@@ -20,19 +20,25 @@ import (
 // Table - Table structure.
 type Table struct {
 	*shared.BasicTable
-	Attributes       []Attribute
-	attributeNameMap map[string]*Attribute
-	kvStore          *shared.KVStore
+	// Attributes       []Attribute           // why are we repeating this?
+	// attributeNameMap map[string]*Attribute // why are we repeating this?
+	kvStore *shared.KVStore
+
+	tableCache *shared.TableCacheStruct // copied from bitmap from session
 }
 
 // Attribute - Field structure.
 type Attribute struct {
 	*shared.BasicAttribute
-	Parent         *Table
+	//Parent         *Table
 	valueMap       map[interface{}]uint64
 	reverseMap     map[uint64]interface{}
 	mapperInstance Mapper
 	localLock      sync.RWMutex
+}
+
+func (a *Attribute) GetParent() shared.TableInterface {
+	return a.Parent
 }
 
 const (
@@ -40,20 +46,30 @@ const (
 	SEP = string(os.PathSeparator)
 )
 
-var (
-	tableCache     map[string]*Table = make(map[string]*Table, 0)
-	tableCacheLock sync.RWMutex
-)
+func GetCoreAttribute(t *Table) *Attribute {
+	return nil // fixme
+}
+
+func (t *Table) GetName() string {
+	return t.Name
+}
 
 // LoadTable - Load and initialize table object.
-func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *api.Client) (*Table, error) {
+// we'll be working with core.Table and core.Attribute and not shared.Table and shared.Attribute
+// is this the ONLY table maker?
+func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared.KVStore, name string, consulClient *api.Client) (*Table, error) {
 
-	tableCacheLock.Lock()
-	defer tableCacheLock.Unlock()
-	if t, ok := tableCache[name]; ok {
-		t.kvStore = kvStore
+	tableCache.TableCacheLock.Lock()
+	defer tableCache.TableCacheLock.Unlock()
+
+	if t, ok := tableCache.TableCache[name]; ok {
+		coreTable, ok := t.(*Table)
+		if !ok {
+			return nil, fmt.Errorf("table %s is not a core table", name)
+		}
+		coreTable.kvStore = kvStore
 		u.Debugf("Found table %s in cache.", name)
-		return t, nil
+		return coreTable, nil
 	}
 
 	u.Debugf("Loading table %s.", name)
@@ -62,14 +78,18 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 		return nil, err
 	}
 
-	table := &Table{BasicTable: sch, kvStore: kvStore, Attributes: make([]Attribute, len(sch.Attributes))}
+	table := &Table{BasicTable: sch, kvStore: kvStore}
+	table.Attributes = make([]shared.AttributeInterface, len(sch.Attributes))
+	table.tableCache = tableCache
 	for j := range sch.Attributes { // wrap BasicAttributes
-		v := &Attribute{BasicAttribute: &sch.Attributes[j]}
-		table.Attributes[j] = *v
-		table.Attributes[j].Parent = table
+		sharedAttr := sch.Attributes[j].(*shared.BasicAttribute)
+		v := &Attribute{BasicAttribute: sharedAttr} //promote BasicAttribute to Attribute
+		table.Attributes[j] = v
+		jattr := table.Attributes[j].(*shared.BasicAttribute)
+		jattr.Parent = table
 	}
 
-	table.attributeNameMap = make(map[string]*Attribute)
+	table.AttributeNameMap = make(map[string]shared.AttributeInterface)
 
 	// Refactor this
 	/*
@@ -89,18 +109,22 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 	i := 1
 	for j, v := range table.Attributes {
 
-		if v.SourceName == "" && v.FieldName == "" {
+		attr, ok := v.(*Attribute)
+		if !ok {
+			return nil, fmt.Errorf("attribute is not a core attribute")
+		}
+		if attr.SourceName == "" && attr.FieldName == "" {
 			return nil, fmt.Errorf("a valid attribute must have an input source name or field name.  Neither exists")
 		}
 
 		// Register a plugin if present
-		if v.MappingStrategy == "Custom" || v.MappingStrategy == "CustomBSI" {
-			if v.MapperConfig == nil {
+		if attr.MappingStrategy == "Custom" || attr.MappingStrategy == "CustomBSI" {
+			if attr.MapperConfig == nil {
 				return nil, fmt.Errorf("custom plugin configuration missing")
 			}
-			if pname, ok := v.MapperConfig["name"]; !ok {
+			if pname, ok := attr.MapperConfig["name"]; !ok {
 				return nil, fmt.Errorf("custom plugin name not specified")
-			} else if plugPath, ok := v.MapperConfig["plugin"]; !ok {
+			} else if plugPath, ok := attr.MapperConfig["plugin"]; !ok {
 				return nil, fmt.Errorf("custom plugin SO name not specified")
 			} else {
 				plug, err := plugin.Open(plugPath + ".so")
@@ -119,26 +143,28 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 			}
 		}
 
-		if v.MappingStrategy == "ParentRelation" {
-			if v.ForeignKey == "" {
-				return nil, fmt.Errorf("foreign key table name must be specified for %s", v.FieldName)
+		if attr.MappingStrategy == "ParentRelation" {
+			if attr.ForeignKey == "" {
+				return nil, fmt.Errorf("foreign key table name must be specified for %s", attr.FieldName)
 			}
 		}
-		if v.MappingStrategy != "ChildRelation" {
-			if table.Attributes[j].mapperInstance, err = ResolveMapper(&v); err != nil {
+		jattr := table.Attributes[j].(*Attribute)
+		if attr.MappingStrategy != "ChildRelation" {
+
+			if jattr.mapperInstance, err = ResolveMapper(attr); err != nil {
 				return nil, err
 			}
 		}
 
-		if v.FieldName != "" {
+		if attr.FieldName != "" {
 
 			// check to see if there are values in the API call (if applicable)
-			lookupName := table.Name + SEP + v.FieldName + ".StringEnum"
+			lookupName := table.Name + SEP + attr.FieldName + ".StringEnum"
 			// if there are values in schema.yaml then override string enum values in global cache
-			if f, ok := fieldMap[lookupName]; ok && len(table.Attributes[j].Values) > 0 {
+			if f, ok := fieldMap[lookupName]; ok && len(jattr.Values) > 0 {
 				// Pull it in
 				values := make([]FieldValue, 0)
-				for _, x := range table.Attributes[j].Values {
+				for _, x := range jattr.Values {
 					values = append(values, FieldValue{Mapping: x.Value.(string), Value: uint64(x.RowID),
 						Label: x.Value.(string)})
 				}
@@ -146,7 +172,7 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 			}
 
 			// Dont allow string enum values to override local cache
-			if x, ok := fieldMap[lookupName]; ok && len(table.Attributes[j].Values) == 0 {
+			if x, ok := fieldMap[lookupName]; ok && len(jattr.Values) == 0 {
 				var values []shared.Value = make([]shared.Value, 0)
 				for _, z := range x.Values {
 					if z.Mapping == "" {
@@ -154,54 +180,54 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 					}
 					values = append(values, shared.Value{Value: z.Mapping, RowID: uint64(z.Value), Desc: z.Label})
 				}
-				table.Attributes[j].Values = values
+				jattr.Values = values
 			}
 
 			// check to see if there is an external json values file and load it
-			if x, err3 := ioutil.ReadFile(path + SEP + name + SEP + v.FieldName + ".json"); err3 == nil {
+			if x, err3 := ioutil.ReadFile(path + SEP + name + SEP + attr.FieldName + ".json"); err3 == nil {
 				var values []shared.Value
 				if err4 := json.Unmarshal(x, &values); err4 == nil {
-					table.Attributes[j].Values = values
+					jattr.Values = values
 				}
 			}
 
-			table.attributeNameMap[v.FieldName] = &table.Attributes[j]
+			table.AttributeNameMap[attr.FieldName] = jattr
 		}
 
-		if v.FieldName == "" {
-			if v.MappingStrategy == "ChildRelation" {
-				if v.ChildTable == "" {
+		if attr.FieldName == "" {
+			if attr.MappingStrategy == "ChildRelation" {
+				if attr.ChildTable == "" {
 					// Child table name must be leaf in path ('.' is path sep)
-					idx := strings.LastIndex(v.SourceName, ".")
+					idx := strings.LastIndex(attr.SourceName, ".")
 					if idx >= 0 {
-						table.Attributes[j].ChildTable = v.SourceName[idx+1:]
+						jattr.ChildTable = attr.SourceName[idx+1:]
 					} else {
-						table.Attributes[j].ChildTable = v.SourceName
+						jattr.ChildTable = attr.SourceName
 					}
 				}
 				continue
 			}
-			v.FieldName = v.SourceName
-			table.attributeNameMap[v.SourceName] = &table.Attributes[j]
+			attr.FieldName = attr.SourceName
+			table.AttributeNameMap[attr.SourceName] = jattr
 		}
 
 		// Enable lookup by alias (field name)
-		if v.SourceName == "" || v.SourceName != v.FieldName {
-			table.attributeNameMap[v.FieldName] = &table.Attributes[j]
+		if attr.SourceName == "" || attr.SourceName != attr.FieldName {
+			table.AttributeNameMap[attr.FieldName] = jattr
 		}
-		table.Attributes[j].valueMap = make(map[interface{}]uint64)
-		table.Attributes[j].reverseMap = make(map[uint64]interface{})
-		if len(table.Attributes[j].Values) > 0 {
-			for _, x := range table.Attributes[j].Values {
-				table.Attributes[j].valueMap[x.Value] = x.RowID
-				table.Attributes[j].reverseMap[x.RowID] = x.Value
+		jattr.valueMap = make(map[interface{}]uint64)
+		jattr.reverseMap = make(map[uint64]interface{})
+		if len(jattr.Values) > 0 {
+			for _, x := range jattr.Values {
+				jattr.valueMap[x.Value] = x.RowID
+				jattr.reverseMap[x.RowID] = x.Value
 			}
 		}
 
-		if v.Type == "NotExist" || v.Type == "NotDefined" || v.Type == "JSON" {
+		if attr.Type == "NotExist" || attr.Type == "NotDefined" || attr.Type == "JSON" {
 			continue
 		}
-		table.Attributes[j].Ordinal = i
+		jattr.Ordinal = i
 
 		i++
 	}
@@ -213,33 +239,24 @@ func LoadTable(path string, kvStore *shared.KVStore, name string, consulClient *
 				fmt.Errorf("A primary key field was defined but it does not contain valid field name(s) [%s] - %v",
 					table.PrimaryKey, err)
 		}
-		if table.TimeQuantumType != "" && (pka[0].Type != "Date" && pka[0].Type != "DateTime") {
+		pkattrsn, ok := pka[0].(*Attribute)
+		if !ok { // this should never happen
+			return nil, fmt.Errorf("primary key attribute is not a core Attribute")
+		}
+		if table.TimeQuantumType != "" && (pkattrsn.Type != "Date" && pkattrsn.Type != "DateTime") {
 			return nil, fmt.Errorf("time partitions enabled for PK %s, Type must be Date or DateTime",
-				pka[0].FieldName)
+				pkattrsn.FieldName)
 		}
 	}
 
-	tableCache[name] = table
+	tableCache.TableCache[name] = table
 	return table, nil
 }
 
-// GetAttribute - Get a table's attribute by name.
-func (t *Table) GetAttribute(name string) (*Attribute, error) {
-
-	if t == nil || t.attributeNameMap == nil {
-		return nil, fmt.Errorf("schema cache not re-initialized ")
-	}
-
-	if attr, ok := t.attributeNameMap[name]; ok {
-		return attr, nil
-	}
-	return nil, fmt.Errorf("attribute '%s' not found", name)
-}
-
 // GetPrimaryKeyInfo - Return attributes for a given PK.
-func (t *Table) GetPrimaryKeyInfo() ([]*Attribute, error) {
+func (t *Table) GetPrimaryKeyInfo() ([]shared.AttributeInterface, error) {
 	s := strings.Split(t.PrimaryKey, "+")
-	attrs := make([]*Attribute, len(s))
+	attrs := make([]shared.AttributeInterface, len(s))
 	for i, v := range s {
 		if attr, err := t.GetAttribute(strings.TrimSpace(v)); err == nil {
 			attrs[i] = attr
@@ -248,6 +265,19 @@ func (t *Table) GetPrimaryKeyInfo() ([]*Attribute, error) {
 		}
 	}
 	return attrs, nil
+}
+
+// GetAttribute - Get a table's attribute by name.
+func (t *Table) GetAttribute(name string) (shared.AttributeInterface, error) {
+
+	if t == nil || t.AttributeNameMap == nil {
+		return nil, fmt.Errorf("schema cache not re-initialized ")
+	}
+
+	if attr, ok := t.AttributeNameMap[name]; ok {
+		return attr, nil
+	}
+	return nil, fmt.Errorf("attribute '%s' not found", name)
 }
 
 // GetAlternateKeyInfo - Return attributes for a given SK.
@@ -260,7 +290,7 @@ func (t *Table) GetAlternateKeyInfo() (map[string][]*Attribute, error) {
 		attrs := make([]*Attribute, len(s2))
 		for i, w := range s2 {
 			if attr, err := t.GetAttribute(strings.TrimSpace(w)); err == nil {
-				attrs[i] = attr
+				attrs[i] = attr.(*Attribute)
 			} else {
 				return nil, err
 			}
@@ -273,8 +303,10 @@ func (t *Table) GetAlternateKeyInfo() (map[string][]*Attribute, error) {
 
 // GetFKSpec - Get info for foreign key
 func (a *Attribute) GetFKSpec() (string, string, error) {
+
+	attrParent := a.Parent.(*Table)
 	if a.ForeignKey == "" {
-		return "", "", fmt.Errorf("field %s.%s is not a foreign key", a.Parent.Name, a.FieldName)
+		return "", "", fmt.Errorf("field %s.%s is not a foreign key", attrParent.Name, a.FieldName)
 	}
 	s := strings.Split(a.ForeignKey, ".")
 	table := s[0]
@@ -289,12 +321,19 @@ func (a *Attribute) GetFKSpec() (string, string, error) {
 // GetValue - Return row ID for a given input value (StringEnum).
 func (a *Attribute) GetValue(invalue interface{}) (uint64, error) {
 
-	tableCacheLock.RLock()
-	defer tableCacheLock.RUnlock()
+	parentTable := a.Parent.(*Table)
 
-	la, lerr := tableCache[a.Parent.Name].GetAttribute(a.FieldName)
+	parentTable.tableCache.TableCacheLock.RLock()
+	defer parentTable.tableCache.TableCacheLock.RUnlock()
+
+	// why are we doing this? We have the parent, why look in the cache?
+	laTmp, lerr := parentTable.tableCache.TableCache[parentTable.Name].GetAttribute(a.FieldName)
 	if lerr != nil {
 		return 0, fmt.Errorf("Cannot lookup attribute %s from table cache.", a.FieldName)
+	}
+	la, ok2 := laTmp.(*Attribute)
+	if !ok2 {
+		return 0, fmt.Errorf("attribute is not a core Attribute")
 	}
 	la.localLock.RLock()
 
@@ -312,17 +351,17 @@ func (a *Attribute) GetValue(invalue interface{}) (uint64, error) {
 
 		la.localLock.RUnlock()
 
-		if a.Parent.kvStore == nil {
+		if parentTable.kvStore == nil {
 			return 0, fmt.Errorf("kvStore is not initialized")
 		}
-		if a.Parent.Name == "" {
-			panic("a.Parent.Name is empty")
+		if parentTable.Name == "" {
+			panic("parentTable.Name is empty")
 		}
 
 		la.localLock.Lock()
 
 		// OK, value not anywhere to be found, invoke service to add.
-		rowID, err := a.Parent.kvStore.PutStringEnum(a.Parent.Name+SEP+a.FieldName+".StringEnum",
+		rowID, err := parentTable.kvStore.PutStringEnum(parentTable.Name+SEP+a.FieldName+".StringEnum",
 			value.(string))
 		if err != nil {
 			return 0, err
@@ -344,17 +383,23 @@ func (a *Attribute) GetValue(invalue interface{}) (uint64, error) {
 // GetValueForID - Reverse map a value for a given row ID.  (StringEnum)
 func (a *Attribute) GetValueForID(id uint64) (interface{}, error) {
 
-	if a.Parent.attributeNameMap == nil {
-		tableCacheLock.Lock()
-		defer tableCacheLock.Unlock()
+	parentTable := a.Parent.(*Table)
+
+	if parentTable.AttributeNameMap == nil {
+		parentTable.tableCache.TableCacheLock.Lock()
+		defer parentTable.tableCache.TableCacheLock.Unlock()
 	} else {
-		tableCacheLock.RLock()
-		defer tableCacheLock.RUnlock()
+		parentTable.tableCache.TableCacheLock.RLock()
+		defer parentTable.tableCache.TableCacheLock.RUnlock()
 	}
 
-	la, lerr := tableCache[a.Parent.Name].GetAttribute(a.FieldName)
+	laTmp, lerr := parentTable.tableCache.TableCache[parentTable.Name].GetAttribute(a.FieldName)
 	if lerr != nil {
 		return 0, fmt.Errorf("Cannot lookup attribute %s from table cache.", a.FieldName)
+	}
+	la, ok2 := laTmp.(*Attribute)
+	if !ok2 {
+		return 0, fmt.Errorf("attribute is not a core Attribute")
 	}
 	la.localLock.RLock()
 
@@ -369,10 +414,10 @@ func (a *Attribute) GetValueForID(id uint64) (interface{}, error) {
 	if a.MappingStrategy != "StringEnum" {
 		return 0, fmt.Errorf("GetValueForID attribute %s is not a StringEnum", a.FieldName)
 	}
-	lookupName := a.Parent.Name + SEP + a.FieldName + ".StringEnum"
-	x, err := a.Parent.kvStore.Items(lookupName, reflect.String, reflect.Uint64)
+	lookupName := parentTable.Name + SEP + a.FieldName + ".StringEnum"
+	x, err := parentTable.kvStore.Items(lookupName, reflect.String, reflect.Uint64)
 	if err != nil {
-		return nil, fmt.Errorf("ERROR: GetValueForID cannot open enum for table %s, field %s. [%v]", a.Parent.Name,
+		return nil, fmt.Errorf("ERROR: GetValueForID cannot open enum for table %s, field %s. [%v]", parentTable.Name,
 			a.FieldName, err)
 	}
 	for kk, vv := range x {
@@ -466,7 +511,8 @@ func (t *Table) LoadFieldValues() (fieldMap map[string]*Field, err error) {
 
 	var attributeFieldMap map[string]*Field = make(map[string]*Field)
 
-	for _, attr := range t.Attributes {
+	for _, v := range t.Attributes {
+		attr := v.(*Attribute)
 		if attr.MappingStrategy != "StringEnum" {
 			continue
 		}
@@ -494,11 +540,12 @@ func (t *Table) LoadFieldValues() (fieldMap map[string]*Field, err error) {
 }
 
 // ClearTableCache - Clear the table cache.
-func ClearTableCache() {
+// needs arg. There's no tableCache except in bitmap from session
+func not_ClearTableCache() {
 
-	tableCacheLock.Lock()
-	defer tableCacheLock.Unlock()
-	tableCache = make(map[string]*Table, 0)
+	// tableCacheLock.Lock() atw fixme atw fixme atw fixme atw fixme atw fixme
+	// defer tableCacheLock.Unlock()
+	// tableCache = make(map[string]*Table, 0)
 }
 
 // ReadLockChanges

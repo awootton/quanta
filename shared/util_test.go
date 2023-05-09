@@ -37,21 +37,21 @@ func xxTestConsul(t *testing.T) {
 		gender, err2 := schema.GetAttribute("gender")
 		assert.Nil(t, err2)
 		if assert.NotNil(t, gender) {
-			assert.Equal(t, gender.MappingStrategy, "StringEnum")
+			assert.Equal(t, gender.(*BasicAttribute).MappingStrategy, "StringEnum")
 		}
-		assert.Equal(t, len(gender.Values), 2)
+		assert.Equal(t, len(gender.(*BasicAttribute).Values), 2)
 
 		regionList, err2 := schema.GetAttribute("region_list")
 		assert.Nil(t, err2)
 		if assert.NotNil(t, regionList) {
-			assert.NotNil(t, regionList.MapperConfig)
-			assert.Equal(t, regionList.MapperConfig["delim"], ",")
+			assert.NotNil(t, regionList.(*BasicAttribute).MapperConfig)
+			assert.Equal(t, regionList.(*BasicAttribute).MapperConfig["delim"], ",")
 		}
 
 		name, err3 := schema.GetAttribute("name")
 		assert.Nil(t, err3)
 		if assert.NotNil(t, name) {
-			assert.True(t, name.IsBSI())
+			assert.True(t, name.(*BasicAttribute).IsBSI())
 		}
 
 		ok, _ := TableExists(consulClient, "cities")

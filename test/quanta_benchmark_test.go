@@ -44,7 +44,7 @@ func (suite *QuantaTestSuite2) SetupSuite() {
 	suite.node, err = Setup() // harness setup
 	assert.NoError(suite.T(), err)
 
-	core.ClearTableCache()
+	// atw fixme core.ClearTableCache()
 	RemoveContents("./testdata/index")
 	RemoveContents("./testdata/bitmap")
 
@@ -61,7 +61,7 @@ func (suite *QuantaTestSuite2) SetupSuite() {
 	functions.LoadAll() // Custom functions
 
 	// Simulate the mySQL proxy endpoint for golang dbdriver connection clients.
-	src, err2 := source.NewQuantaSource("./testdata/config", "", 0, 1)
+	src, err2 := source.NewQuantaSource(suite.node.TableCache, "./testdata/config", "", 0, 1)
 	assert.NoError(suite.T(), err2)
 	schema.RegisterSourceAsSchema("quanta", src)
 
@@ -107,7 +107,7 @@ func (suite *QuantaTestSuite2) loadData(table, filePath string, conn *shared.Con
 		return err
 	}
 	num := int(pr.GetNumRows())
-	c, err := core.OpenSession("./testdata/config", table, false, conn)
+	c, err := core.OpenSession(suite.node.TableCache, "./testdata/config", table, false, conn)
 	assert.Nil(suite.T(), err)
 	assert.NotNil(suite.T(), c)
 

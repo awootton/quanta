@@ -3,11 +3,13 @@ package source
 import (
 	"database/sql/driver"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
+
 	//u "github.com/araddon/gou"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/araddon/qlbridge/datasource"
@@ -90,8 +92,8 @@ func decorateRow(row []driver.Value, proj *rel.Projection, rowCols map[string]in
 }
 
 func outputProjection(outCh exec.MessageChan, sigChan exec.SigChan, proj *core.Projector,
-		colNames, rowCols map[string]int, limit, offset int, isExport, isDistinct bool, pro *rel.Projection,
-		params map[string]interface{}) error {
+	colNames, rowCols map[string]int, limit, offset int, isExport, isDistinct bool, pro *rel.Projection,
+	params map[string]interface{}) error {
 
 	batchSize := limit
 	nThreads := 1
@@ -176,7 +178,7 @@ func outputProjection(outCh exec.MessageChan, sigChan exec.SigChan, proj *core.P
 			}
 		})
 	}
-	err, timedOut := shared.WaitTimeout(&eg, time.Duration(timeout) * time.Second, sigChan)
+	err, timedOut := shared.WaitTimeout(&eg, time.Duration(timeout)*time.Second, sigChan)
 	if err != nil {
 		return err
 	}
@@ -186,8 +188,8 @@ func outputProjection(outCh exec.MessageChan, sigChan exec.SigChan, proj *core.P
 	return nil
 }
 
-func createFinalProjectionFromMaps(orig *rel.SqlSelect, aliasMap map[string]*rel.SqlSource, allTables []string, 
-		sch *schema.Schema, driverTable string) (*rel.Projection, map[string]int, []string, []string, error) {
+func createFinalProjectionFromMaps(orig *rel.SqlSelect, aliasMap map[string]*rel.SqlSource, allTables []string,
+	sch *schema.Schema, driverTable string) (*rel.Projection, map[string]int, []string, []string, error) {
 
 	tableMap := make(map[string]*schema.Table)
 	projCols := make([]string, 0)
@@ -277,9 +279,9 @@ func createFinalProjectionFromMaps(orig *rel.SqlSelect, aliasMap map[string]*rel
 	return ret, colNames, projCols, joinCols, nil
 }
 
-func createProjection(orig *rel.SqlSelect, sch *schema.Schema, driverTable string, 
-		whereProj map[string]*core.Attribute) (*rel.Projection, map[string]int, map[string]int, 
-		[]string, []string, error) {
+func createProjection(orig *rel.SqlSelect, sch *schema.Schema, driverTable string,
+	whereProj map[string]*core.Attribute) (*rel.Projection, map[string]int, map[string]int,
+	[]string, []string, error) {
 
 	tableMap := make(map[string]*schema.Table)
 	aliasMap := make(map[string]*rel.SqlSource)
@@ -366,9 +368,11 @@ func createProjection(orig *rel.SqlSelect, sch *schema.Schema, driverTable strin
 				if _, ok := projColsMap[k]; ok {
 					continue
 				}
-				table := tableMap[v.Parent.Name]
-				if vt, ok := table.Column(v.FieldName); ok {
-					c := rel.NewColumn(v.FieldName)
+				attr := v // .(*core.Attribute)
+				parentTable := attr.Parent.(*shared.BasicTable)
+				table := tableMap[parentTable.Name]
+				if vt, ok := table.Column(attr.FieldName); ok {
+					c := rel.NewColumn(attr.FieldName)
 					ret.AddColumn(c, vt)
 				}
 			}
@@ -435,7 +439,7 @@ func createProjection(orig *rel.SqlSelect, sch *schema.Schema, driverTable strin
 			} else {
 				table = tableMap[orig.From[0].Name]
 			}
-			if _, ok :=  rowCols[colName]; !ok {
+			if _, ok := rowCols[colName]; !ok {
 				p := fmt.Sprintf("%s.%s", table.Name, v.SourceField)
 				if pv, ok := projColsMap[p]; ok {
 					rowCols[colName] = pv

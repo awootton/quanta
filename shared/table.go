@@ -7,28 +7,80 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/araddon/qlbridge/value"
+
 	"github.com/hashicorp/consul/api"
 	"gopkg.in/yaml.v2"
 )
 
+type TableCacheStruct struct { // used in core Table
+	TableCache     map[string]TableInterface
+	TableCacheLock sync.RWMutex
+}
+
+type TableInterface interface {
+	GetAttribute(name string) (AttributeInterface, error)
+	GetPrimaryKeyInfo() ([]AttributeInterface, error)
+	Compare(other *BasicTable) (equal bool, warnings []string, err error)
+	GetName() string
+}
+
 // BasicTable - Table structure.
 type BasicTable struct {
-	Name             string                     `yaml:"tableName"`
-	PrimaryKey       string                     `yaml:"primaryKey,omitempty"`
-	SecondaryKeys    string                     `yaml:"secondaryKeys,omitempty"`
-	DefaultPredicate string                     `yaml:"defaultPredicate,omitempty"`
-	TimeQuantumType  string                     `yaml:"timeQuantumType,omitempty"`
-	DisableDedup     bool                       `yaml:"disableDedup,omitempty"`
-	Attributes       []BasicAttribute           `yaml:"attributes"`
-	attributeNameMap map[string]*BasicAttribute `yaml:"-"`
-	ConsulClient     *api.Client                `yaml:"-"`
+	Name             string                        `yaml:"tableName"`
+	PrimaryKey       string                        `yaml:"primaryKey,omitempty"`
+	SecondaryKeys    string                        `yaml:"secondaryKeys,omitempty"`
+	DefaultPredicate string                        `yaml:"defaultPredicate,omitempty"`
+	TimeQuantumType  string                        `yaml:"timeQuantumType,omitempty"`
+	DisableDedup     bool                          `yaml:"disableDedup,omitempty"`
+	Attributes       []AttributeInterface          `yaml:"attributes"`
+	AttributeNameMap map[string]AttributeInterface `yaml:"-"`
+	ConsulClient     *api.Client                   `yaml:"-"`
+}
+
+type AttributeInterface interface {
+	GetParent() TableInterface
+}
+
+func (t *BasicTable) UnmarshalYAML(
+	unmarshal func(interface{}) error,
+) error {
+
+	var err error
+
+	m := yaml.MapSlice{}
+	unmarshal(&m)
+
+	t.Name = m[0].Value.(string)
+
+	err = unmarshal(&t.Name)
+	if err != nil {
+		return err
+	}
+	err = unmarshal(t.PrimaryKey)
+	if err != nil {
+		return err
+	}
+	err = unmarshal(t.SecondaryKeys)
+	if err != nil {
+		return err
+	}
+
+	attrArray := make([]BasicAttribute, 0)
+
+	// err := unmarshal(attrArray)
+
+	fmt.Println("attrArray: ", attrArray)
+
+	return err
+
 }
 
 // BasicAttribute - Field structure.
 type BasicAttribute struct {
-	Parent           *BasicTable       `yaml:"-" json:"-"`
+	Parent           TableInterface    `yaml:"-" json:"-"` // BasicTable
 	FieldName        string            `yaml:"fieldName"`
 	SourceName       string            `yaml:"sourceName"`
 	ChildTable       string            `yaml:"childTable,omitempty"`
@@ -54,6 +106,19 @@ type BasicAttribute struct {
 	TimeQuantumType  string            `yaml:"timeQuantumType,omitempty"`
 	Exclusive        bool              `yaml:"exclusive,omitempty"`
 	DelegationTarget string            `yaml:"delegationTarget,omitempty"`
+}
+
+func (a *BasicAttribute) GetParent() TableInterface {
+	return a.Parent
+}
+func (a *BasicTable) GetName() string {
+	return a.Name
+}
+
+func NewTableCacheStruct() *TableCacheStruct {
+	tcs := &TableCacheStruct{}
+	tcs.TableCache = make(map[string]TableInterface)
+	return tcs
 }
 
 // Value - Metadata value items for StringEnum mapper type.
@@ -157,9 +222,10 @@ const (
 )
 
 // LoadSchema - Load a new Table object from configuration.
-func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable, error) {
+func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable, error) { // was BasicTable
 
-	var table BasicTable
+	var table BasicTable // TableInterface // BasicTable or core.Table
+	table.Attributes = make([]AttributeInterface, len(table.Attributes))
 	if path != "" {
 		b, err := ioutil.ReadFile(path + SEP + name + SEP + "schema.yaml")
 		if err != nil {
@@ -171,65 +237,69 @@ func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable
 		}
 	} else { // load from Consul
 		var err error
-		table, err = UnmarshalConsul(consulClient, name)
+		table, err = unmarshalConsul(consulClient, name)
 		if err != nil {
 			return nil, fmt.Errorf("Error UnmarshalConsul: %v", err)
 		}
 	}
 
 	table.ConsulClient = consulClient
-	table.attributeNameMap = make(map[string]*BasicAttribute)
+	table.AttributeNameMap = make(map[string]AttributeInterface)
 
-	i := 1
+	index := 1
 	for j, v := range table.Attributes {
 
-		table.Attributes[j].Parent = &table
-		v.Parent = &table
+		// this makes no sense:
+		jattr := table.Attributes[j].(*BasicAttribute) // j is index, v is value
+		attr := v.(*BasicAttribute)
 
-		if v.SourceName == "" && v.FieldName == "" {
+		jattr.Parent = &table
+		attr.Parent = &table
+
+		if attr.SourceName == "" && attr.FieldName == "" {
 			return nil, fmt.Errorf("a valid attribute must have an input source name or field name.  Neither exists")
 		}
 
-		if v.MappingStrategy == "ParentRelation" {
-			if v.ForeignKey == "" {
-				return nil, fmt.Errorf("foreign key table name must be specified for %s", v.FieldName)
+		if attr.MappingStrategy == "ParentRelation" {
+			if attr.ForeignKey == "" {
+				return nil, fmt.Errorf("foreign key table name must be specified for %s", attr.FieldName)
 			}
 			// Force field to be mapped by IntBSIMapper
-			v.MappingStrategy = "IntBSI"
+			attr.MappingStrategy = "IntBSI"
 		}
 
-		if v.FieldName != "" {
-			table.attributeNameMap[v.FieldName] = &table.Attributes[j]
+		if attr.FieldName != "" {
+			table.AttributeNameMap[attr.FieldName] = jattr
 		}
 
-		if v.FieldName == "" {
-			if v.MappingStrategy == "ChildRelation" {
-				if v.ChildTable == "" {
+		if attr.FieldName == "" {
+			if attr.MappingStrategy == "ChildRelation" {
+				if attr.ChildTable == "" {
 					// Child table name must be leaf in path ('.' is path sep)
-					idx := strings.LastIndex(v.SourceName, ".")
+					idx := strings.LastIndex(attr.SourceName, ".")
 					if idx >= 0 {
-						table.Attributes[j].ChildTable = v.SourceName[idx+1:]
+						jattr.ChildTable = attr.SourceName[idx+1:]
 					} else {
-						table.Attributes[j].ChildTable = v.SourceName
+						jattr.ChildTable = attr.SourceName
 					}
 				}
 				continue
 			}
-			v.FieldName = v.SourceName
-			table.attributeNameMap[v.SourceName] = &table.Attributes[j]
+			attr.FieldName = attr.SourceName
+			table.AttributeNameMap[attr.SourceName] = jattr
 		}
 
 		// Enable lookup by alias (field name)
-		if v.SourceName == "" || v.SourceName != v.FieldName {
-			table.attributeNameMap[v.FieldName] = &table.Attributes[j]
+		if attr.SourceName == "" || attr.SourceName != attr.FieldName {
+			table.AttributeNameMap[attr.FieldName] = jattr
 		}
 
-		if v.Type == "NotExist" || v.Type == "NotDefined" || v.Type == "JSON" {
+		if attr.Type == "NotExist" || attr.Type == "NotDefined" || attr.Type == "JSON" {
 			continue
 		}
-		table.Attributes[j].Ordinal = i
+		jattr.Ordinal = index
 
-		i++
+		index++
 	}
 
 	if table.PrimaryKey != "" {
@@ -239,27 +309,28 @@ func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable
 				fmt.Errorf("A primary key field was defined but it is not valid field name(s) [%s] - %v",
 					table.PrimaryKey, err)
 		}
-		if table.TimeQuantumType != "" && (pka[0].Type != "Date" && pka[0].Type != "DateTime") {
+		attr := pka[0].(*BasicAttribute)
+		if table.TimeQuantumType != "" && (attr.Type != "Date" && attr.Type != "DateTime") {
 			return nil, fmt.Errorf("time partitions enabled for PK %s, Type must be Date or DateTime",
-				pka[0].FieldName)
+				attr.FieldName)
 		}
 	}
 	return &table, nil
 }
 
 // GetAttribute - Get a tables attribute by name.
-func (t *BasicTable) GetAttribute(name string) (*BasicAttribute, error) {
+func (t *BasicTable) GetAttribute(name string) (AttributeInterface, error) {
 
-	if attr, ok := t.attributeNameMap[name]; ok {
+	if attr, ok := t.AttributeNameMap[name]; ok {
 		return attr, nil
 	}
 	return nil, fmt.Errorf("attribute '%s' not found", name)
 }
 
 // GetPrimaryKeyInfo - Return attributes for a given PK.
-func (t *BasicTable) GetPrimaryKeyInfo() ([]*BasicAttribute, error) {
+func (t *BasicTable) GetPrimaryKeyInfo() ([]AttributeInterface, error) {
 	s := strings.Split(t.PrimaryKey, "+")
-	attrs := make([]*BasicAttribute, len(s))
+	attrs := make([]AttributeInterface, len(s))
 	for i, v := range s {
 		if attr, err := t.GetAttribute(strings.TrimSpace(v)); err == nil {
 			attrs[i] = attr
@@ -313,11 +384,13 @@ func (t *BasicTable) Compare(other *BasicTable) (equal bool, warnings []string, 
 
 	// Compare these attributes against other attributes - drops not allowed.
 	for _, v := range t.Attributes {
-		otherAttr, err := other.GetAttribute(v.FieldName)
+		attr := v.(*BasicAttribute)
+		otherAttr, err := other.GetAttribute(attr.FieldName)
 		if err != nil {
-			return false, warnings, fmt.Errorf("attribute %s cannot be dropped", v.FieldName)
+			return false, warnings, fmt.Errorf("attribute %s cannot be dropped", attr.FieldName)
 		}
-		attrEqual, attrWarnings, attrErr := v.Compare(otherAttr)
+		other := otherAttr.(*BasicAttribute)
+		attrEqual, attrWarnings, attrErr := attr.Compare(other)
 		if attrErr != nil {
 			return false, warnings, attrErr
 		}
@@ -329,9 +402,10 @@ func (t *BasicTable) Compare(other *BasicTable) (equal bool, warnings []string, 
 
 	// Compare other attributes against these attributes - new adds allowed.
 	for _, v := range other.Attributes {
-		_, err := t.GetAttribute(v.FieldName)
+		attr := v.(*BasicAttribute)
+		_, err := t.GetAttribute(attr.FieldName)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("new attribute '%s', addition is allowable", v.FieldName))
+			warnings = append(warnings, fmt.Sprintf("new attribute '%s', addition is allowable", attr.FieldName))
 		}
 	}
 

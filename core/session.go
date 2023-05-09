@@ -76,9 +76,13 @@ func NewTableBuffer(table *Table) (*TableBuffer, error) {
 		if err != nil {
 			return nil, err
 		}
-		tb.PKAttributes = pka
 		for _, v := range pka {
-			tb.PKMap[v.FieldName] = v
+			attr, ok := v.(*Attribute)
+			if !ok {
+				return nil, fmt.Errorf("Error casting attribute %v", v)
+			}
+			tb.PKAttributes = append(tb.PKAttributes, attr)
+			tb.PKMap[attr.FieldName] = attr
 		}
 	}
 	tb.rowCache = make(map[string]interface{})
@@ -110,7 +114,7 @@ func (t *TableBuffer) NextColumnID(bi *shared.BitmapIndex) error {
 
 // OpenSession - Creates a connected session to the underlying core.
 // (This is intentionally not thread-safe for maximum throughput.)
-func OpenSession(path, name string, nested bool, conn *shared.Conn) (*Session, error) {
+func OpenSession(tableCache *shared.TableCacheStruct, path, name string, nested bool, conn *shared.Conn) (*Session, error) {
 
 	if name == "" {
 		return nil, fmt.Errorf("table name is nil")
@@ -120,7 +124,7 @@ func OpenSession(path, name string, nested bool, conn *shared.Conn) (*Session, e
 	kvStore := shared.NewKVStore(conn)
 
 	tableBuffers := make(map[string]*TableBuffer, 0)
-	tab, err := LoadTable(path, kvStore, name, consul)
+	tab, err := LoadTable(tableCache, path, kvStore, name, consul)
 	if err != nil {
 		return nil, err
 	} else if nested {
@@ -130,9 +134,13 @@ func OpenSession(path, name string, nested bool, conn *shared.Conn) (*Session, e
 	} else {
 		// Do scan to see if there are parent relations.   If so, open the parent too.
 		for _, v := range tab.Attributes {
-			if v.MappingStrategy == "ParentRelation" && v.ForeignKey != "" {
-				fkTable, _, _ := v.GetFKSpec()
-				parent, err2 := LoadTable(path, kvStore, fkTable, consul)
+			attr, ok := v.(*Attribute)
+			if !ok {
+				return nil, fmt.Errorf("Error casting attribute %v", v)
+			}
+			if attr.MappingStrategy == "ParentRelation" && attr.ForeignKey != "" {
+				fkTable, _, _ := attr.GetFKSpec()
+				parent, err2 := LoadTable(tableCache, path, kvStore, fkTable, consul)
 				if err != nil {
 					return nil, fmt.Errorf("Error loading parent schema - %v", err2)
 				}
@@ -162,10 +170,12 @@ func OpenSession(path, name string, nested bool, conn *shared.Conn) (*Session, e
 
 func recurseAndLoadTable(basePath string, kvStore *shared.KVStore, tableBuffers map[string]*TableBuffer, curTable *Table) error {
 
+	tableCache := curTable.tableCache
 	for _, v := range curTable.Attributes {
-		_, ok := tableBuffers[v.ChildTable]
-		if v.ChildTable != "" && !ok {
-			table, err := LoadTable(basePath, kvStore, v.ChildTable, curTable.ConsulClient)
+		attr := v.(*Attribute)
+		_, ok := tableBuffers[attr.ChildTable]
+		if attr.ChildTable != "" && !ok {
+			table, err := LoadTable(tableCache, basePath, kvStore, attr.ChildTable, curTable.ConsulClient)
 			if err != nil {
 				return err
 			}
@@ -174,7 +184,7 @@ func recurseAndLoadTable(basePath string, kvStore *shared.KVStore, tableBuffers 
 				return fmt.Errorf("while loading %s, %v", table.Name, err)
 			}
 			if tb, err := NewTableBuffer(table); err == nil {
-				tableBuffers[v.ChildTable] = tb
+				tableBuffers[attr.ChildTable] = tb
 			} else {
 				return fmt.Errorf("recurseAndLoadTable error - %v", err)
 			}
@@ -201,14 +211,14 @@ func (s *Session) IsDriverForJoin(table, joinCol string) bool {
 	if !ok {
 		return false
 	}
-	attr, err := tbuf.Table.GetAttribute(joinCol)
+	attrTmp, err := tbuf.Table.GetAttribute(joinCol)
 	if err != nil {
 		return false
 	}
+	attr := attrTmp.(*Attribute)
 	if attr.ForeignKey == "" {
 		return false
 	}
-
 	return true
 }
 
@@ -233,6 +243,8 @@ func (s *Session) PutRow(name string, row interface{}, providedColID uint64, ign
 
 func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath string, providedColID uint64,
 	isChild, ignoreSourcePath, useNerdCapitalization bool) error {
+
+	// tableCache := s.BitIndex.tableCache
 
 	tbuf, ok := s.TableBuffers[name]
 	if !ok {
@@ -259,31 +271,33 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 	}
 
 	for _, v := range curTable.Attributes {
+		attr := v.(*Attribute)
 		if curTable.PrimaryKey != "" {
-			if _, found := tbuf.PKMap[v.FieldName]; found {
+			if _, found := tbuf.PKMap[attr.FieldName]; found {
 				continue // Already handled at this point
 			}
 		}
 		// Construct parquet column path
-		if recurse && v.MappingStrategy == "ChildRelation" && v.ChildTable != "" {
+		if recurse && attr.MappingStrategy == "ChildRelation" && attr.ChildTable != "" {
 			// Should we verify that it is a parquet repetition type if child relation?
-			pqChildPath := fmt.Sprintf("%s.%s", pqTablePath, v.SourceName)
+			pqChildPath := fmt.Sprintf("%s.%s", pqTablePath, attr.SourceName)
 			root := "/"
 			if r, ok := row.(*reader.ParquetReader); ok {
 				root = r.SchemaHandler.GetRootExName()
 			}
-			if strings.HasPrefix(v.SourceName, "/") {
-				pqChildPath = fmt.Sprintf("%s.%s", root, v.SourceName[1:])
-			} else if strings.HasPrefix(v.SourceName, "^") {
-				pqChildPath = fmt.Sprintf("%s.%s.list.element.%s", root, v.Parent.Name, v.SourceName[1:])
+			if strings.HasPrefix(attr.SourceName, "/") {
+				pqChildPath = fmt.Sprintf("%s.%s", root, attr.SourceName[1:])
+			} else if strings.HasPrefix(attr.SourceName, "^") {
+				attrParent := attr.Parent.(*Table)
+				pqChildPath = fmt.Sprintf("%s.%s.list.element.%s", root, attrParent.Name, attr.SourceName[1:])
 			}
-			if err := s.recursivePutRow(v.ChildTable, row, pqChildPath, providedColID, true, ignoreSourcePath,
+			if err := s.recursivePutRow(attr.ChildTable, row, pqChildPath, providedColID, true, ignoreSourcePath,
 				useNerdCapitalization); err != nil {
 				return err
 			}
-		} else if v.MappingStrategy == "ParentRelation" && v.ForeignKey != "" {
+		} else if attr.MappingStrategy == "ParentRelation" && attr.ForeignKey != "" {
 			// Foreign key processing
-			fkTable, fkFieldSpec, _ := v.GetFKSpec()
+			fkTable, fkFieldSpec, _ := attr.GetFKSpec()
 			relBuf, ok := s.TableBuffers[fkTable]
 			if !ok {
 				return fmt.Errorf("Could not locate parent table buffer for [%s]", fkTable)
@@ -291,11 +305,11 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 			var relColumnID uint64
 			okToMap := true
 			if !s.Nested {
-				if v.SourceName == "" {
-					return fmt.Errorf("Not a nested import, source must be specified for %s", v.FieldName)
+				if attr.SourceName == "" {
+					return fmt.Errorf("Not a nested import, source must be specified for %s", attr.FieldName)
 				}
 
-				lookupKey, err := s.resolveFKLookupKey(&v, tbuf, row, ignoreSourcePath, useNerdCapitalization)
+				lookupKey, err := s.resolveFKLookupKey(attr, tbuf, row, ignoreSourcePath, useNerdCapitalization)
 				if err != nil {
 					return fmt.Errorf("resolveFKLookupKey %v", err)
 				}
@@ -315,19 +329,19 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 			}
 			if okToMap {
 				// Store the parent table ColumnID in the IntBSI for join queries
-				if _, err := v.MapValue(relColumnID, s); err != nil {
-					return fmt.Errorf("Error Mapping FK [%s].[%s] - %v", v.Parent.Name, v.FieldName, err)
+				if _, err := attr.MapValue(relColumnID, s); err != nil {
+					return fmt.Errorf("Error Mapping FK [%s].[%s] - %v", attr.Parent.GetName(), attr.FieldName, err)
 				}
 			}
 		} else {
-			vals, pqps, err := s.readColumn(row, pqTablePath, &v, isChild, ignoreSourcePath, useNerdCapitalization)
+			vals, pqps, err := s.readColumn(row, pqTablePath, attr, isChild, ignoreSourcePath, useNerdCapitalization)
 			if err != nil {
 				return fmt.Errorf("Parquet reader error - %v", err)
 			}
 			for _, cval := range vals {
 				if cval != nil {
 					// Map and index the value
-					if _, err := v.MapValue(cval, s); err != nil {
+					if _, err := attr.MapValue(cval, s); err != nil {
 						return fmt.Errorf("%s - %v", pqps[0], err)
 					}
 				}
@@ -379,7 +393,7 @@ func (s *Session) readColumn(row interface{}, pqTablePath string, v *Attribute,
 						pqColPath = fmt.Sprintf("%s.%s", strings.Title(root), strings.Title(source[1:]))
 					}
 				} else if strings.HasPrefix(source, "^") {
-					pqColPath = fmt.Sprintf("%s.%s.list.element.%s", root, v.Parent.Name, source[1:])
+					pqColPath = fmt.Sprintf("%s.%s.list.element.%s", root, v.Parent.GetName(), source[1:])
 				}
 			} else {
 				if useNerdCapitalization {
@@ -391,9 +405,9 @@ func (s *Session) readColumn(row interface{}, pqTablePath string, v *Attribute,
 		}
 		pqColPaths[i] = pqColPath
 		// Check cache first
-		tbuf, ok := s.TableBuffers[v.Parent.Name]
+		tbuf, ok := s.TableBuffers[v.Parent.GetName()]
 		if !ok {
-			return nil, nil, fmt.Errorf("readColumn: table not open for %s", v.Parent.Name)
+			return nil, nil, fmt.Errorf("readColumn: table not open for %s", v.Parent.GetName())
 		}
 		val, found := tbuf.rowCache[pqColPath]
 		if !found && !isParquet {
@@ -487,19 +501,25 @@ func (s *Session) getDefaultValueForColumn(a *Attribute, row interface{}, ignore
 	)
 	rm := make(map[string]interface{})
 
+	attrs := a.Parent.(*shared.BasicTable).Attributes
+
 	// convert source paths to fieldname paths in incoming row
 	if r, ok = row.(*reader.ParquetReader); ok {
 		if r != nil {
-			for _, v := range a.Parent.Attributes {
-				if v.SourceName == "" {
+			for _, v := range attrs {
+				attr, ok := v.(*Attribute)
+				if !ok {
+					fmt.Errorf("error casting attribute to *Attribute")
+				}
+				if attr.SourceName == "" {
 					continue
 				}
 				var err error
 				var val interface{}
-				if val, err = shared.GetPath(v.SourceName, row, ignoreSourcePath, useNerd); err != nil {
-					val = v.SourceName
+				if val, err = shared.GetPath(attr.SourceName, row, ignoreSourcePath, useNerd); err != nil {
+					val = attr.SourceName
 				}
-				rm[v.FieldName] = val
+				rm[attr.FieldName] = val
 			}
 		}
 		var ctx *datasource.ContextSimple
@@ -520,16 +540,20 @@ func (s *Session) getDefaultValueForColumn(a *Attribute, row interface{}, ignore
 		// return fmt.Sprintf("%v", val.Value())
 	} else if r, ok = row.(map[string]interface{}); ok {
 		if r != nil {
-			for _, v := range a.Parent.Attributes {
-				if v.SourceName == "" {
+			for _, v := range attrs {
+				attr, ok := v.(*Attribute)
+				if !ok {
+					fmt.Errorf("error casting attribute to *Attribute")
+				}
+				if attr.SourceName == "" {
 					continue
 				}
 				var err error
 				var val interface{}
-				if val, err = shared.GetPath(v.SourceName[1:], row, ignoreSourcePath, useNerd); err != nil {
-					val = r.(map[string]interface{})[v.SourceName]
+				if val, err = shared.GetPath(attr.SourceName[1:], row, ignoreSourcePath, useNerd); err != nil {
+					val = r.(map[string]interface{})[attr.SourceName]
 				}
-				rm[v.FieldName] = val
+				rm[attr.FieldName] = val
 			}
 		}
 		var ctx *datasource.ContextSimple
@@ -883,8 +907,12 @@ func (s *Session) MapValue(tableName, fieldName string, value interface{}, updat
 	if !ok {
 		return 0, fmt.Errorf("Table %s invalid or not opened. (MapValue)", tableName)
 	}
-	attr, err := tbuf.Table.GetAttribute(fieldName)
+	attrIntf, err := tbuf.Table.GetAttribute(fieldName)
 	if err != nil {
+		return 0, fmt.Errorf("attribute '%s' not found", fieldName)
+	}
+	attr, ok := attrIntf.(*Attribute)
+	if !ok {
 		return 0, fmt.Errorf("attribute '%s' not found", fieldName)
 	}
 
@@ -903,15 +931,16 @@ func (s *Session) MapValue(tableName, fieldName string, value interface{}, updat
 	return attr.MapValue(value, nil) // Non load use case pass nil connection context
 }
 
+// resolveJSColumnPathForField is unused - delete me.
 func resolveJSColumnPathForField(jsTablePath string, v *Attribute, isChild bool) (jsColPath string) {
 
 	// BEGIN CUSTOM CODE FOR VISION
 	//if strings.HasSuffix(jsTablePath, "media.0") {
-	if v.Parent.Name == "media" {
+	if v.Parent.GetName() == "media" {
 		jsColPath = fmt.Sprintf("events.0.event_tracktype_properties.%s", v.SourceName)
 		return
 	}
-	if v.Parent.Name == "events" {
+	if v.Parent.GetName() == "events" {
 		s := strings.Split(v.SourceName, ".")
 		if len(s) > 1 {
 			switch s[0] {
@@ -932,11 +961,12 @@ func resolveJSColumnPathForField(jsTablePath string, v *Attribute, isChild bool)
 	if strings.HasPrefix(v.SourceName, "/") {
 		jsColPath = v.SourceName[1:]
 	} else if strings.HasPrefix(v.SourceName, "^") {
-		jsColPath = fmt.Sprintf("%s.%s", v.Parent.Name, v.SourceName[1:])
+		jsColPath = fmt.Sprintf("%s.%s", v.Parent.GetName(), v.SourceName[1:])
 	}
 	return
 }
 
+// readColumnByPath is unused - delete me.
 func readColumnByPath(path string, line []byte) []interface{} {
 
 	s := strings.Split(path, ".")

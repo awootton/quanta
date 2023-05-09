@@ -56,11 +56,12 @@ type BitmapIndex struct {
 	fragFileLock    sync.Mutex
 	setBitThreads   *CountTrigger
 	writeSignal     chan bool
-	tableCache      map[string]*shared.BasicTable
-	tableCacheLock  sync.RWMutex
-	partitionQueue  chan *PartitionOperation
-	bitmapCount     int
-	bsiCount        int
+	// tableCache      map[string]*shared.BasicTable atw, these in node , delete
+	// tableCacheLock  sync.RWMutex
+	// tableCache     *shared.TableCacheStruct
+	partitionQueue chan *PartitionOperation
+	bitmapCount    int
+	bsiCount       int
 }
 
 // NewBitmapIndex - Construct and initialize bitmap server state.
@@ -68,7 +69,7 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 
 	e := &BitmapIndex{Node: node}
 	e.memoryLimitMb = memoryLimitMb
-	e.tableCache = make(map[string]*shared.BasicTable)
+	e.TableCache = shared.NewTableCacheStruct() // make(map[string]shared.TableInterface) // make(map[string]*shared.BasicTable)
 	configPath := e.dataDir + sep + "config"
 	schemaPath := ""        // this is normally an empty string forcing schema to come from Consul
 	if e.ServicePort == 0 { // In-memory test harness
@@ -87,7 +88,7 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 						u.Errorf("ERROR: Could not load schema for %s - %v", index, err)
 						os.Exit(1)
 					} else {
-						e.tableCache[index] = table
+						e.TableCache.TableCache[index] = table
 						u.Infof("Index %s initialized.", index)
 					}
 				}
@@ -108,7 +109,7 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 				u.Errorf("could not load schema for %s - %v", table, err)
 				os.Exit(1)
 			} else {
-				e.tableCache[table] = t
+				e.TableCache.TableCache[table] = t
 				u.Infof("Table %s initialized.", table)
 			}
 		}
@@ -276,11 +277,17 @@ func (m *BitmapIndex) newBSIBitmap(index, field string) *BSIBitmap {
 		minValue = int64(attr.MinValue)
 		maxValue = int64(attr.MaxValue)
 	}
+	// attr is BassicAttribute
+	parentTable := attr.Parent.(*shared.BasicTable)
 	var seq *SequencerQueue
 	//if attr.Parent.PrimaryKey != "" && attr.Parent.PrimaryKey == attr.FieldName {
-	if attr.Parent.PrimaryKey != "" {
+	if parentTable.PrimaryKey != "" {
 		pkInfo, _ := attr.Parent.GetPrimaryKeyInfo()
-		if attr.FieldName == pkInfo[0].FieldName {
+		attr0, ok := pkInfo[0].(*shared.BasicAttribute)
+		if !ok {
+			u.Errorf("newBSIBitmap - PrimaryKeyInfo[0] is not *shared.BasicAttribute")
+		}
+		if attr.FieldName == attr0.FieldName {
 			// If compound key, sequencer installed on first key attr
 			seq = NewSequencerQueue()
 			if maxValue == 0 {
@@ -316,10 +323,11 @@ func newBitmapFragment(index, field string, rowIDOrBits int64, ts time.Time, f [
 // Lookup field metadata (time quantum, exclusivity)
 func (m *BitmapIndex) getFieldConfig(index, field string) (*shared.BasicAttribute, error) {
 
-	m.tableCacheLock.RLock()
-	defer m.tableCacheLock.RUnlock()
-	table := m.tableCache[index]
-	attr, err := table.GetAttribute(field)
+	m.TableCache.TableCacheLock.RLock()
+	defer m.TableCache.TableCacheLock.RUnlock()
+	table := m.TableCache.TableCache[index].(*shared.BasicTable)
+	attrTmp, err := table.GetAttribute(field)
+	attr := attrTmp.(*shared.BasicAttribute)
 	if err != nil {
 		return nil, fmt.Errorf("getFieldConfig ERROR: Non existent attribute %s for index %s was referenced",
 			field, index)
@@ -333,13 +341,14 @@ func (m *BitmapIndex) getFieldConfig(index, field string) (*shared.BasicAttribut
 // Check metadata - Is the field a BSI?
 func (m *BitmapIndex) isBSI(index, field string) bool {
 
-	m.tableCacheLock.RLock()
-	defer m.tableCacheLock.RUnlock()
-	table := m.tableCache[index]
-	attr, err := table.GetAttribute(field)
+	m.TableCache.TableCacheLock.RLock()
+	defer m.TableCache.TableCacheLock.RUnlock()
+	table := m.TableCache.TableCache[index].(*shared.BasicTable) // always safe
+	attrTmp, err := table.GetAttribute(field)
 	if err != nil {
 		u.Errorf("attribute %s for index %s does not exist", field, index)
 	}
+	attr := attrTmp.(*shared.BasicAttribute)
 	return attr.IsBSI()
 }
 
@@ -1127,15 +1136,15 @@ func (m *BitmapIndex) TableOperation(ctx context.Context, req *pb.TableOperation
 			u.Errorf("could not load schema for %s - %v", req.Table, err)
 			os.Exit(1)
 		} else {
-			m.tableCacheLock.Lock()
-			defer m.tableCacheLock.Unlock()
-			m.tableCache[req.Table] = table
+			m.TableCache.TableCacheLock.Lock()
+			defer m.TableCache.TableCacheLock.Unlock()
+			m.TableCache.TableCache[req.Table] = table
 			u.Infof("schema for %s re-loaded and initialized", req.Table)
 		}
 	case pb.TableOperationRequest_DROP:
-		m.tableCacheLock.Lock()
-		defer m.tableCacheLock.Unlock()
-		delete(m.tableCache, req.Table)
+		m.TableCache.TableCacheLock.Lock()
+		defer m.TableCache.TableCacheLock.Unlock()
+		delete(m.TableCache.TableCache, req.Table)
 		m.Truncate(req.Table)
 		tableDir := m.dataDir + sep + "bitmap" + sep + req.Table
 		if err := os.RemoveAll(tableDir); err != nil {
@@ -1144,8 +1153,8 @@ func (m *BitmapIndex) TableOperation(ctx context.Context, req *pb.TableOperation
 			u.Infof("Table %s dropped.", req.Table)
 		}
 	case pb.TableOperationRequest_TRUNCATE:
-		m.tableCacheLock.Lock()
-		defer m.tableCacheLock.Unlock()
+		m.TableCache.TableCacheLock.Lock()
+		defer m.TableCache.TableCacheLock.Unlock()
 		m.Truncate(req.Table)
 		tableDir := m.dataDir + sep + "bitmap" + sep + req.Table
 		if err := os.RemoveAll(tableDir); err != nil {

@@ -243,9 +243,11 @@ func StartProxy(count int, testDataPath string) *LocalProxyControl {
 	fmt.Println("Proxy before NewQuantaSource")
 
 	// Construct Quanta source
+	tableCache := shared.NewTableCacheStruct() // is this right?
 
+	// configDir := "../test/testdata" // gets: ../test/testdata/config/schema.yaml
 	configDir := ""
-	src, err := source.NewQuantaSource(configDir, proxy.ConsulAddr, proxy.QuantaPort, sessionPoolSize) // do we really want this here?
+	src, err := source.NewQuantaSource(tableCache, configDir, proxy.ConsulAddr, proxy.QuantaPort, sessionPoolSize) // do we really want this here?
 	if err != nil {
 		u.Error(err)
 	}

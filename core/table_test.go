@@ -3,17 +3,21 @@ package core
 import (
 	"testing"
 
+	"github.com/disney/quanta/shared"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestLoadTable(t *testing.T) {
 
-	table, err := LoadTable("./testdata", nil, "cities", nil)
+	tcs := shared.NewTableCacheStruct()
+
+	table, err := LoadTable(tcs, "./testdata", nil, "cities", nil)
 	assert.Nil(t, err)
 	if assert.NotNil(t, table) {
 		assert.NotNil(t, table.BasicTable)
 		assert.Equal(t, 15, len(table.Attributes))
-		regionList, err2 := table.GetAttribute("region_list")
+		regionListTmp, err2 := table.GetAttribute("region_list")
+		regionList := regionListTmp.(*Attribute)
 		assert.Nil(t, err2)
 		if assert.NotNil(t, regionList) {
 			assert.NotNil(t, regionList.MapperConfig)
@@ -25,14 +29,16 @@ func TestLoadTable(t *testing.T) {
 		name, err3 := table.GetAttribute("name")
 		assert.Nil(t, err3)
 		if assert.NotNil(t, name) {
-			assert.True(t, name.IsBSI())
+			assert.True(t, name.(*Attribute).IsBSI())
 		}
 	}
 }
 
 func TestLoadTableWithPK(t *testing.T) {
 
-	table, err := LoadTable("./testdata", nil, "cityzip", nil)
+	tcs := shared.NewTableCacheStruct()
+
+	table, err := LoadTable(tcs, "./testdata", nil, "cityzip", nil)
 	assert.Nil(t, err)
 	pki, err2 := table.GetPrimaryKeyInfo()
 	assert.Nil(t, err2)
@@ -42,11 +48,13 @@ func TestLoadTableWithPK(t *testing.T) {
 
 func TestLoadTableWithRelation(t *testing.T) {
 
-	table, err := LoadTable("./testdata", nil, "cityzip", nil)
+	tcs := shared.NewTableCacheStruct()
+
+	table, err := LoadTable(tcs, "./testdata", nil, "cityzip", nil)
 	assert.Nil(t, err)
 	fka, err2 := table.GetAttribute("city_id")
 	assert.Nil(t, err2)
-	tab, spec, err3 := fka.GetFKSpec()
+	tab, spec, err3 := fka.(*Attribute).GetFKSpec()
 	assert.Nil(t, err3)
 	assert.NotNil(t, tab)
 	assert.NotNil(t, spec)

@@ -45,9 +45,10 @@ type QuantaSource struct {
 }
 
 // NewQuantaSource - Construct a QuantaSource. For Proxy
-func NewQuantaSource(baseDir, consulAddr string, servicePort, sessionPoolSize int) (*QuantaSource, error) {
+func NewQuantaSource(tableCache *shared.TableCacheStruct, baseDir, consulAddr string, servicePort, sessionPoolSize int) (*QuantaSource, error) {
 
 	m := &QuantaSource{}
+
 	var err error
 	var consulClient *api.Client
 	if consulAddr != "" {
@@ -69,7 +70,7 @@ func NewQuantaSource(baseDir, consulAddr string, servicePort, sessionPoolSize in
 	// Register for member leave/join notifications.
 	clientConn.RegisterService(m)
 
-	m.sessionPool = core.NewSessionPool(clientConn, m.Schema, baseDir, sessionPoolSize)
+	m.sessionPool = core.NewSessionPool(tableCache, clientConn, m.Schema, baseDir, sessionPoolSize)
 
 	m.baseDir = baseDir
 	if m.baseDir != "" {
@@ -149,25 +150,34 @@ func (m *QuantaSource) Table(table string) (*schema.Table, error) {
 	pkMap := make(map[string]*core.Attribute)
 	pka, _ := ts.GetPrimaryKeyInfo()
 	for _, v := range pka {
-		pkMap[v.FieldName] = v
+		attr, ok := v.(*core.Attribute)
+		if !ok {
+			return nil, fmt.Errorf("cannot convert to *core.Attribute")
+		}
+		pkMap[attr.FieldName] = attr
 	}
 	tbl := schema.NewTable(table)
 	cols := make([]string, 0)
 	for _, v := range ts.Attributes {
-		if v.FieldName == "" {
-			if v.MappingStrategy == "ChildRelation" {
+		attr, ok := v.(*core.Attribute)
+		if !ok {
+			return nil, fmt.Errorf("cannot convert to *core.Attribute")
+		}
+		if attr.FieldName == "" {
+			if attr.MappingStrategy == "ChildRelation" {
 				continue // Ignore these
 			}
 			return nil, fmt.Errorf("field name missing from schema definition")
 		}
-		cols = append(cols, v.FieldName)
-		f := schema.NewField(v.FieldName, shared.ValueTypeFromString(v.Type),
-			0, v.Required, v.DefaultValue, v.ForeignKey, "-", v.Desc)
-		f.Extra = v.MappingStrategy
-		if v.ForeignKey != "" {
-			f.Key = fmt.Sprintf("FK: %s", v.ForeignKey)
+		cols = append(cols, attr.FieldName)
+		f := schema.NewField(attr.FieldName, shared.ValueTypeFromString(attr.Type),
+			0, attr.Required, attr.DefaultValue, attr.ForeignKey, "-", attr.Desc)
+		f.Extra = attr.MappingStrategy
+		if attr.ForeignKey != "" {
+			f.Key = fmt.Sprintf("FK: %s", attr.ForeignKey)
 		} else {
-			if f.Name == pka[0].FieldName && len(pka) > 1 {
+			pkaAttr := pka[0].(*core.Attribute)
+			if f.Name == pkaAttr.FieldName && len(pka) > 1 {
 				f.Key = "PK*"
 			} else if _, found := pkMap[f.Name]; found {
 				f.Key = "PK"
@@ -175,13 +185,13 @@ func (m *QuantaSource) Table(table string) (*schema.Table, error) {
 				f.Key = "-"
 			}
 		}
-		if v.Desc != "" {
-			f.Description = v.Desc
+		if attr.Desc != "" {
+			f.Description = attr.Desc
 		} else {
 			f.Description = "-"
 		}
-		if v.SourceName != "" {
-			f.Collation = v.SourceName
+		if attr.SourceName != "" {
+			f.Collation = attr.SourceName
 		}
 		tbl.AddField(f)
 	}

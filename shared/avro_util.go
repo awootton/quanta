@@ -1,8 +1,9 @@
 package shared
 
 import (
-	"github.com/hamba/avro"
 	"regexp"
+
+	"github.com/hamba/avro"
 )
 
 // ToAvroSchema - Generate an AVRO schema from a table.
@@ -15,12 +16,13 @@ func ToAvroSchema(table *BasicTable) avro.Schema {
 
 	fields := make([]*avro.Field, 0)
 	for _, v := range table.Attributes {
-		if v.SourceName == "" {
+		attr := v.(*BasicAttribute)
+		if attr.SourceName == "" {
 			continue
 		}
-		name := reg.ReplaceAllString(v.SourceName, "")
+		name := reg.ReplaceAllString(attr.SourceName, "")
 		var field *avro.Field
-		switch TypeFromString(v.Type) {
+		switch TypeFromString(attr.Type) {
 		case String:
 			field, _ = avro.NewField(name, avro.NewPrimitiveSchema(avro.String, nil), nil)
 		case Integer:

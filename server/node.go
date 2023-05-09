@@ -110,6 +110,8 @@ type Node struct {
 
 	State         StateType
 	localServices map[string]NodeService
+
+	TableCache *shared.TableCacheStruct
 }
 
 // NewNode - Construct a new node instance.
@@ -120,6 +122,7 @@ func NewNode(version string, port int, bindAddr, dataDir, hashKey string, consul
 	m.localServices = make(map[string]NodeService, 0)
 	m.ServicePort = port
 	m.Quorum = 0
+	m.TableCache = shared.NewTableCacheStruct()
 	if hashKey == "" {
 		return nil, fmt.Errorf("hash key is empty")
 	}

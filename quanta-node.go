@@ -69,12 +69,12 @@ func main() {
 	}
 
 	kvStore := server.NewKVStore(m)
-	m.AddNodeService(kvStore)
+	m.AddNodeService(kvStore) // needs ? tableCache ?
 
 	search := server.NewStringSearch(m)
 	m.AddNodeService(search)
 
-	bitmapIndex := server.NewBitmapIndex(m, int(*memLimit))
+	bitmapIndex := server.NewBitmapIndex(m, int(*memLimit)) // has tableCache
 	m.AddNodeService(bitmapIndex)
 
 	// Start listening endpoint

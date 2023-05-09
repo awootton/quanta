@@ -152,8 +152,8 @@ func putRecursive(typ reflect.Type, value reflect.Value, consul *api.Client, roo
 	return nil
 }
 
-// UnmarshalConsul - Populate the contents of the Table struct from Consul
-func UnmarshalConsul(consul *api.Client, name string) (BasicTable, error) {
+// unmarshalConsul - Populate the contents of the Table struct from Consul
+func unmarshalConsul(consul *api.Client, name string) (BasicTable, error) {
 
 	table := BasicTable{Name: name}
 	keys, _, _ := consul.KV().Keys("schema/"+name, "", nil)
@@ -300,8 +300,9 @@ func CheckParentRelation(consul *api.Client, table *BasicTable) (bool, error) {
 	ok := true
 	var err error
 	for _, v := range table.Attributes {
-		if v.ForeignKey != "" {
-			ok, err = TableExists(consul, v.ForeignKey)
+		attr := v.(*BasicAttribute)
+		if attr.ForeignKey != "" {
+			ok, err = TableExists(consul, attr.ForeignKey)
 			if err != nil {
 				err = fmt.Errorf("CheckParentRelation error: %v", err)
 				ok = false

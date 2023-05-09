@@ -6,12 +6,13 @@ package core
 
 import (
 	"fmt"
-	"github.com/araddon/dateparse"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/araddon/dateparse"
 )
 
 // StringHashBSIMapper - High cardinality string mapping.
@@ -40,16 +41,18 @@ func (m StringHashBSIMapper) MapValue(attr *Attribute, val interface{}, c *Sessi
 		return
 	}
 
+	attrParent := attr.Parent.(*Table)
+
 	if c != nil {
-		if tbuf, ok := c.TableBuffers[attr.Parent.Name]; ok {
+		if tbuf, ok := c.TableBuffers[attrParent.Name]; ok {
 			if attr.Searchable {
 				err = c.StringIndex.Index(strVal)
 			}
-			stringPath := indexPath(tbuf, attr.FieldName, "strings")    // indexPath() is in core/session.go
+			stringPath := indexPath(tbuf, attr.FieldName, "strings") // indexPath() is in core/session.go
 			c.BatchBuffer.SetPartitionedString(stringPath, tbuf.CurrentColumnID, val)
-			err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+			err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 		} else {
-			err = fmt.Errorf("table %s not open for this connection", attr.Parent.Name)
+			err = fmt.Errorf("table %s not open for this connection", attrParent.Name)
 		}
 	}
 	return
@@ -68,6 +71,8 @@ func NewBoolDirectMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map boolean values true/false to rowid = 0 false rowid = 1 true
 func (m BoolDirectMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	result = uint64(0)
 	switch val.(type) {
@@ -107,7 +112,7 @@ func (m BoolDirectMapper) MapValue(attr *Attribute, val interface{},
 		return
 	}
 	if c != nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -134,6 +139,8 @@ func NewIntDirectMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map a value to a row ID.
 func (m IntDirectMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	switch val.(type) {
 	case uint64:
@@ -166,7 +173,7 @@ func (m IntDirectMapper) MapValue(attr *Attribute, val interface{},
 		return
 	}
 	if c != nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -191,10 +198,12 @@ func NewStringToIntDirectMapper(conf map[string]string) (Mapper, error) {
 func (m StringToIntDirectMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
 
+	attrParent := attr.Parent.(*Table)
+
 	var v int64
 	v, err = strconv.ParseInt(strings.TrimSpace(val.(string)), 10, 64)
 	if err == nil && c != nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	if v <= 0 {
 		err = fmt.Errorf("cannot map %d as a positive non-zero value", v)
@@ -217,6 +226,8 @@ func NewFloatScaleBSIMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map a value to an int64.
 func (m FloatScaleBSIMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	var floatVal float64
 	switch val.(type) {
@@ -243,7 +254,7 @@ func (m FloatScaleBSIMapper) MapValue(attr *Attribute, val interface{},
 	}
 	result = uint64(floatVal * float64(math.Pow10(attr.Scale)))
 	if c != nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -261,6 +272,8 @@ func NewIntBSIMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map a value to an int64.
 func (m IntBSIMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	switch val.(type) {
 	case int64:
@@ -291,7 +304,7 @@ func (m IntBSIMapper) MapValue(attr *Attribute, val interface{},
 		err = fmt.Errorf("%s: No handling for type '%T'", m.String(), val)
 	}
 	if c != nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -316,6 +329,8 @@ func NewStringEnumMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map a value to a row id.
 func (m StringEnumMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	var multi []string
 	switch val.(type) {
@@ -347,7 +362,7 @@ func (m StringEnumMapper) MapValue(attr *Attribute, val interface{},
 			if result, err = attr.GetValue(val); err != nil {
 				return
 			}
-			if err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries); err != nil {
+			if err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries); err != nil {
 				return
 			}
 		}
@@ -393,6 +408,8 @@ func NewBoolRegexMapper(conf map[string]string) (Mapper, error) {
 func (m BoolRegexMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
 
+	attrParent := attr.Parent.(*Table)
+
 	switch val.(type) {
 	case bool:
 		result = uint64(0)
@@ -404,7 +421,7 @@ func (m BoolRegexMapper) MapValue(attr *Attribute, val interface{},
 	}
 
 	if c != nil && err == nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -438,6 +455,8 @@ func NewSysMillisBSIMapper(conf map[string]string) (Mapper, error) {
 func (m SysMillisBSIMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
 
+	attrParent := attr.Parent.(*Table)
+
 	switch val.(type) {
 	case string:
 		strVal := val.(string)
@@ -467,7 +486,7 @@ func (m SysMillisBSIMapper) MapValue(attr *Attribute, val interface{},
 		err = fmt.Errorf("%s: No handling for type '%T'", m.String(), val)
 	}
 	if c != nil && err == nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -485,6 +504,8 @@ func NewSysMicroBSIMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Maps a value to an int64.
 func (m SysMicroBSIMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	switch val.(type) {
 	case string:
@@ -515,7 +536,7 @@ func (m SysMicroBSIMapper) MapValue(attr *Attribute, val interface{},
 		err = fmt.Errorf("%s: No handling for type '%T'", m.String(), val)
 	}
 	if c != nil && err == nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -533,6 +554,8 @@ func NewSysSecBSIMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Maps a value to an int64.
 func (m SysSecBSIMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	switch val.(type) {
 	case string:
@@ -559,7 +582,7 @@ func (m SysSecBSIMapper) MapValue(attr *Attribute, val interface{},
 		err = fmt.Errorf("%s: No handling for type '%T'", m.String(), val)
 	}
 	if c != nil && err == nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }
@@ -577,6 +600,8 @@ func NewIntToBoolDirectMapper(conf map[string]string) (Mapper, error) {
 // MapValue - Map a value to a row id.
 func (m IntToBoolDirectMapper) MapValue(attr *Attribute, val interface{},
 	c *Session) (result uint64, err error) {
+
+	attrParent := attr.Parent.(*Table)
 
 	switch val.(type) {
 	case int:
@@ -599,7 +624,7 @@ func (m IntToBoolDirectMapper) MapValue(attr *Attribute, val interface{},
 	}
 
 	if c != nil && err == nil {
-		err = m.UpdateBitmap(c, attr.Parent.Name, attr.FieldName, result, attr.IsTimeSeries)
+		err = m.UpdateBitmap(c, attrParent.Name, attr.FieldName, result, attr.IsTimeSeries)
 	}
 	return
 }

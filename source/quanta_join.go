@@ -40,6 +40,8 @@ type JoinMerge struct {
 	allTables   []string
 	driverTable string
 	aliases     map[string]*rel.SqlSource
+
+	tableCache *shared.TableCacheStruct
 }
 
 // NewQuantaJoinMerge - Construct a QuantaJoinMerge task.
@@ -345,14 +347,14 @@ func (m *JoinMerge) Run() error {
 		if err != nil {
 			return err
 		}
-		if len(orig.From) == 1 {  // Assume Subquery
-			_, cn, projFields, joinFields, err = createFinalProjectionFromMaps(orig, m.aliases, m.allTables, 
-					m.Ctx.Schema, m.driverTable)
+		if len(orig.From) == 1 { // Assume Subquery
+			_, cn, projFields, joinFields, err = createFinalProjectionFromMaps(orig, m.aliases, m.allTables,
+				m.Ctx.Schema, m.driverTable)
 			if err != nil {
 				return err
 			}
 		}
-		con, err := m.makeBufferedConnection(m.driverTable)
+		con, err := m.makeBufferedConnection(m.tableCache, m.driverTable)
 		if err != nil {
 			return err
 		}
@@ -378,7 +380,7 @@ func (m *JoinMerge) Run() error {
 	return nil
 }
 
-func (m *JoinMerge) makeBufferedConnection(driverTable string) (*core.Session, error) {
+func (m *JoinMerge) makeBufferedConnection(tableCache *shared.TableCacheStruct, driverTable string) (*core.Session, error) {
 
 	port, ok := m.Ctx.Session.Get(servicePort)
 	if !ok {
@@ -394,7 +396,7 @@ func (m *JoinMerge) makeBufferedConnection(driverTable string) (*core.Session, e
 	if err := clientConn.Connect(nil); err != nil {
 		return nil, fmt.Errorf("error opening quanta connection - %v", err)
 	}
-	return core.OpenSession(basePath.ToString(), driverTable, false, clientConn)
+	return core.OpenSession(tableCache, basePath.ToString(), driverTable, false, clientConn)
 }
 
 func (m *JoinMerge) callJoin(table string, foundSets map[string]*roaring64.Bitmap,

@@ -2,6 +2,7 @@ package functions
 
 import (
 	"fmt"
+
 	u "github.com/araddon/gou"
 	"github.com/araddon/qlbridge/expr"
 	"github.com/araddon/qlbridge/value"
@@ -9,11 +10,9 @@ import (
 	"github.com/disney/quanta/source"
 )
 
-//
 // StratifiedSample - Perform stratified sampling.  Use in query predicate attribute filter.
 //
 // stratifed_sample("fieldName", 1.5)
-//
 type StratifiedSample struct{}
 
 // Type - return type.
@@ -45,7 +44,8 @@ func stratifiedSampleEval(ctx expr.EvalContext, args []value.Value) (value.Value
 		}
 		u.Errorf("stratified_sample error %s.", err)
 	} else {
-		q.Index = fr.Parent.Name
+		parentTable := fr.Parent.(*shared.BasicTable)
+		q.Index = parentTable.Name
 	}
 	switch args[1].Type() {
 	case value.NumberType:

@@ -3,6 +3,9 @@ package source
 import (
 	"database/sql/driver"
 	"fmt"
+	"math"
+	"time"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	u "github.com/araddon/gou"
 	"github.com/araddon/qlbridge/datasource"
@@ -10,8 +13,6 @@ import (
 	"github.com/araddon/qlbridge/rel"
 	"github.com/disney/quanta/core"
 	"github.com/disney/quanta/shared"
-	"math"
-	"time"
 )
 
 var (
@@ -141,16 +142,16 @@ func (m *ResultReader) Run() error {
 		//u.Debugf("In source Scanner iter %#v", msg)
 		outCh <- msg
 		return nil
-	//} else if orig != nil && len(orig.From) > 1 {
+		//} else if orig != nil && len(orig.From) > 1 {
 	} else if len(m.sql.p.Stmt.JoinNodes()) > 0 {
 		// This query must be part of a join.  Pass along the roaring bitmap results to the next
 		// tasks in the process flow.
-/*
-		allTables := make([]string, len(orig.From))
-		for i, v := range orig.From {
-			allTables[i] = v.Name
-		}
-*/
+		/*
+			allTables := make([]string, len(orig.From))
+			for i, v := range orig.From {
+				allTables[i] = v.Name
+			}
+		*/
 		dataMap := make(map[string]interface{})
 		dataMap["results"] = m.response.Results
 		dataMap["fromTime"] = fromTime.UnixNano()
@@ -202,9 +203,13 @@ func (m *ResultReader) Run() error {
 				return errx
 			}
 			table := m.sql.conn.TableBuffers[m.sql.tbl.Name].Table
-			field, err := table.GetAttribute(m.sql.aggField)
+			fieldTmp, err := table.GetAttribute(m.sql.aggField)
 			if err != nil {
 				return err
+			}
+			field, ok2 := fieldTmp.(*core.Attribute)
+			if !ok2 {
+				return fmt.Errorf("field not found: %s", m.sql.aggField)
 			}
 			switch shared.TypeFromString(field.Type) {
 			case shared.Integer:
@@ -271,19 +276,19 @@ func (m *ResultReader) Run() error {
 	//projFields := make([]string, 0)
 	var projFields []string
 	var rowCols map[string]int
-	m.sql.p.Proj, colNames, rowCols, projFields, _, err = createProjection(orig, m.sql.tbl.Schema, "", 
+	m.sql.p.Proj, colNames, rowCols, projFields, _, err = createProjection(orig, m.sql.tbl.Schema, "",
 		m.sql.whereProj)
 	if err != nil {
 		return err
 	}
-/*
-	cols = m.sql.p.Proj.Columns
-	for _, v := range cols {
-		if v.As != "@rownum" {
-			projFields = append(projFields, fmt.Sprintf("%s.%s", m.sql.tbl.Name, v.Name))
+	/*
+		cols = m.sql.p.Proj.Columns
+		for _, v := range cols {
+			if v.As != "@rownum" {
+				projFields = append(projFields, fmt.Sprintf("%s.%s", m.sql.tbl.Name, v.Name))
+			}
 		}
-	}
-*/
+	*/
 
 	foundSet := make(map[string]*roaring64.Bitmap)
 	foundSet[m.sql.tbl.Name] = m.response.Results

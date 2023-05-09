@@ -51,7 +51,7 @@ func (m *BitmapIndex) SyncStatus(ctx context.Context, req *pb.SyncStatusRequest)
 		return nil, err
 	}
 
-	tq := attr.Parent.TimeQuantumType
+	tq := attr.Parent.(*shared.BasicTable).TimeQuantumType
 	if tq != "" && req.Time == 0 {
 		return nil, fmt.Errorf("time not specified for sync status and time quantum is enabled for %s", req.Index)
 	}
@@ -143,7 +143,7 @@ func (m *BitmapIndex) Synchronize(ctx context.Context, req *wrappers.StringValue
 			fmt.Errorf(fmt.Sprintf("%v.Status(_) = _, %v, node = %s\n", m.Admin[ci], err, targetIP))
 	}
 
-	// atw turned off 
+	// atw turned off
 	// Verify that client stub IP (targetIP) is the same as the new nodes IP returned by status.
 	// eg targetIP eg 127.0.0.1:4000 in local mode
 	// eg status.LocalIP eg fe80::1 in local mode so, atw don't do this check in local mode.
@@ -183,7 +183,8 @@ func (m *BitmapIndex) Synchronize(ctx context.Context, req *wrappers.StringValue
 				return &wrappers.Int64Value{Value: int64(-1)},
 					fmt.Errorf("Synchronize field: GetPrimaryKeyInfo() failed for %s.%s - %v", indexName, fieldName, errx)
 			}
-			fieldIsPrimaryKeyAnchor := (fieldName == pka[0].FieldName)
+			pka0 := pka[0].(*shared.BasicAttribute)
+			fieldIsPrimaryKeyAnchor := (fieldName == pka0.FieldName)
 			for t, bsi := range field {
 				// Should this item be pushed to new node?
 				key := fmt.Sprintf("%s/%s/%s", indexName, fieldName, time.Unix(0, t).Format(timeFmt))
@@ -289,13 +290,13 @@ func (m *BitmapIndex) Synchronize(ctx context.Context, req *wrappers.StringValue
 					continue
 				}
 				// Process PK Index
-				pkIndex := fmt.Sprintf("%s%s%s.PK", key, sep, table.PrimaryKey)
+				pkIndex := fmt.Sprintf("%s%s%s.PK", key, sep, table.(*shared.BasicTable).PrimaryKey)
 				err = m.indexKVPush(peerKVClient, newKVClient, pkIndex)
 				if err != nil {
 					u.Errorf("error pushing index %s for table %s - %v", pkIndex, indexName, err)
 				}
 				// Process SK Indices if any
-				for _, v := range strings.Split(table.SecondaryKeys, ",") {
+				for _, v := range strings.Split(table.(*shared.BasicTable).SecondaryKeys, ",") {
 					skIndex := fmt.Sprintf("%s%s%s.SK", key, sep, v)
 					err := m.indexKVPush(peerKVClient, newKVClient, skIndex)
 					if err != nil {

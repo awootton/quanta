@@ -135,8 +135,10 @@ func main() {
 	sink.LoadAll()      // Register output sinks
 	functions.LoadAll() // Custom functions
 
+	tableCache := shared.NewTableCacheStruct() // is this right?
+
 	var err error
-	proxy.Src, err = source.NewQuantaSource("", proxy.ConsulAddr, proxy.QuantaPort, proxy.SessionPoolSize)
+	proxy.Src, err = source.NewQuantaSource(tableCache, "", proxy.ConsulAddr, proxy.QuantaPort, proxy.SessionPoolSize)
 	if err != nil {
 		u.Error(err)
 	}

@@ -1,19 +1,22 @@
 package core
 
 import (
+	"testing"
+
 	"github.com/disney/quanta/shared"
 	"github.com/stretchr/testify/assert"
 	_ "github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestCreateSession(t *testing.T) {
+
+	tableCache := shared.NewTableCacheStruct()
 
 	conn := shared.NewDefaultConnection()
 	conn.ServicePort = 0
 	errx := conn.Connect(nil)
 	assert.Nil(t, errx)
-	c, err := OpenSession("./testdata", "cities", false, conn)
+	c, err := OpenSession(tableCache, "./testdata", "cities", false, conn)
 	assert.Nil(t, err)
 	assert.NotNil(t, c)
 	assert.NotNil(t, c.TableBuffers)

@@ -14,21 +14,21 @@ func TestLoadTable(t *testing.T) {
 		gender, err2 := schema.GetAttribute("gender")
 		assert.Nil(t, err2)
 		if assert.NotNil(t, gender) {
-			assert.Equal(t, gender.MappingStrategy, "StringEnum")
+			assert.Equal(t, gender.(*BasicAttribute).MappingStrategy, "StringEnum")
 		}
-		assert.Equal(t, len(gender.Values), 2)
+		assert.Equal(t, len(gender.(*BasicAttribute).Values), 2)
 
 		regionList, err2 := schema.GetAttribute("region_list")
 		assert.Nil(t, err2)
 		if assert.NotNil(t, regionList) {
-			assert.NotNil(t, regionList.MapperConfig)
-			assert.Equal(t, regionList.MapperConfig["delim"], ",")
+			assert.NotNil(t, regionList.(*BasicAttribute).MapperConfig)
+			assert.Equal(t, regionList.(*BasicAttribute).MapperConfig["delim"], ",")
 		}
 
 		name, err3 := schema.GetAttribute("name")
 		assert.Nil(t, err3)
 		if assert.NotNil(t, name) {
-			assert.True(t, name.IsBSI())
+			assert.True(t, name.(*BasicAttribute).IsBSI())
 		}
 	}
 }
@@ -68,13 +68,13 @@ func TestSchemaCompare(t *testing.T) {
 	newState, errx := new.GetAttribute("state_name")
 	assert.Nil(t, errx)
 	assert.NotNil(t, newState)
-	ok, warnings, err = currState.Compare(newState)
+	ok, warnings, err = currState.(*BasicAttribute).Compare(newState.(*BasicAttribute))
 	assert.Nil(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, 0, len(warnings))
 
-	newState.Desc = "State name."
-	ok, warnings, err = currState.Compare(newState)
+	newState.(*BasicAttribute).Desc = "State name."
+	ok, warnings, err = currState.(*BasicAttribute).Compare(newState.(*BasicAttribute))
 	assert.Nil(t, err)
 	assert.False(t, ok)
 	if assert.Equal(t, 1, len(warnings)) {

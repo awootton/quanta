@@ -150,11 +150,12 @@ func main() {
 	fileChan := make(chan *types.Object, threads)
 	closeLater := make([]*core.Session, 0)
 	var ticker *time.Ticker
+	tableCache := shared.NewTableCacheStruct()
 	// Spin up worker threads
 	if !*dryRun {
 		for i := 0; i < threads; i++ {
 			eg.Go(func() error {
-				conn, err := core.OpenSession("", main.Index, main.IsNested, main.apiHost)
+				conn, err := core.OpenSession(tableCache, "", main.Index, main.IsNested, main.apiHost)
 				if err != nil {
 					return err
 				}

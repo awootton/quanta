@@ -301,9 +301,9 @@ func (m *Conn) CreateNodeConnections(largeBuffer bool) (nodeConns []*grpc.Client
 */
 func (m *Conn) SelectNodes(key interface{}, op OpType) ([]int, error) {
 
-	if len(m.nodeStatusMap) == 0 {
-		m.Update() // atw - populate the map of consul nodes now
-	}
+	// if len(m.nodeStatusMap) == 0 {
+	// 	m.Update() // atw - populate the map of consul nodes now
+	// }
 
 	m.nodeMapLock.RLock()
 	defer m.nodeMapLock.RUnlock()
@@ -538,7 +538,7 @@ func (m *Conn) Update() (err error) {
 	m.idMap = idMap
 	m.ids = ids
 
-	m.HashTable = rendezvous.New(ids)
+	m.HashTable = rendezvous.New(ids) // eg quanta-node-1, quanta-node-2, quanta-node-3
 	m.waitIndex = meta.LastIndex
 
 	// Refresh statuses

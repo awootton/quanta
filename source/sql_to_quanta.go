@@ -97,9 +97,15 @@ func (m *SQLToQuanta) ResolveField(name string) (field *core.Attribute, isBSI bo
 		return
 	}
 	isBSI = false
+	ok := false
 	table := m.conn.TableBuffers[m.tbl.Name].Table
-	field, err = table.GetAttribute(name)
+	fieldTmp, err := table.GetAttribute(name)
 	if err != nil {
+		return
+	}
+	field, ok = fieldTmp.(*core.Attribute)
+	if !ok {
+		err = fmt.Errorf("invalid field %s", name)
 		return
 	}
 	if core.MapperTypeFromString(field.MappingStrategy).IsBSI() {
@@ -226,7 +232,8 @@ func (m *SQLToQuanta) WalkSourceSelect(planner plan.Planner, p *plan.Source) (pl
 
 	if req.Where == nil || req.Where != nil && req.Where.Source != nil {
 		pka, _ := table.GetPrimaryKeyInfo()
-		predicate := fmt.Sprintf("%s != NULL", pka[0].FieldName)
+		pka0 := pka[0].(*shared.BasicAttribute)
+		predicate := fmt.Sprintf("%s != NULL", pka0.FieldName)
 		defaultWhere, _ := expr.ParseExpression(predicate)
 		req.Where = rel.NewSqlWhere(defaultWhere)
 		m.defaultWhere = true
@@ -300,8 +307,12 @@ func (m *SQLToQuanta) WalkSourceSelect(planner plan.Planner, p *plan.Source) (pl
 				tableName = m.tbl.Name
 			}
 			table := m.conn.TableBuffers[tableName].Table
-			if attr, err := table.GetAttribute(fieldName); err == nil {
+			if attrIntf, err := table.GetAttribute(fieldName); err == nil {
 				f := fmt.Sprintf("%s.%s", tableName, fieldName)
+				attr, ok := attrIntf.(*core.Attribute)
+				if !ok {
+					return nil, fmt.Errorf("invalid attribute %s in where clause", f)
+				}
 				m.whereProj[f] = attr
 			}
 		}
@@ -326,10 +337,11 @@ func (m *SQLToQuanta) WalkSourceSelect(planner plan.Planner, p *plan.Source) (pl
 			return nil, fmt.Errorf("If there is a post process filter predicate then you must specify limit")
 		}
 		pka, _ := table.GetPrimaryKeyInfo()
+		pka0 := pka[0].(*shared.BasicAttribute)
 		m.q = shared.NewBitmapQuery()
 		m.q.ToTime = m.endDate
 		p := m.q.NewQueryFragment()
-		p.SetNullPredicate(m.tbl.Name, pka[0].FieldName)
+		p.SetNullPredicate(m.tbl.Name, pka0.FieldName)
 		p.Operation = "DIFFERENCE"
 		p.Negate = true
 		m.q.AddFragment(p)
@@ -430,9 +442,9 @@ func (m *SQLToQuanta) walkFilterTri(node *expr.TriNode, q *shared.QueryFragment)
 		       return nil, err
 		   }
 		*/
-		tbuf, found := m.conn.TableBuffers[fr.Parent.Name]
+		tbuf, found := m.conn.TableBuffers[fr.Parent.GetName()]
 		if !found {
-			err := fmt.Errorf("table %s not open", fr.Parent.Name)
+			err := fmt.Errorf("table %s not open", fr.Parent.GetName())
 			u.Errorf(err.Error())
 			return nil, err
 		}
@@ -487,10 +499,10 @@ func (m *SQLToQuanta) walkFilterTri(node *expr.TriNode, q *shared.QueryFragment)
 			}
 		}
 
-		leftval, err1 := m.conn.MapValue(m.tbl.Name, nm, arg2val.Value(), false)
-		rightval, err2 := m.conn.MapValue(m.tbl.Name, nm, arg3val.Value(), false)
+		leftval, err1 := m.conn.MapValue(m.tbl.GetName(), nm, arg2val.Value(), false)
+		rightval, err2 := m.conn.MapValue(m.tbl.GetName(), nm, arg3val.Value(), false)
 		if err1 == nil && err2 == nil {
-			q.SetBSIRangePredicate(fr.Parent.Name, fr.FieldName, int64(leftval), int64(rightval))
+			q.SetBSIRangePredicate(fr.Parent.GetName(), fr.FieldName, int64(leftval), int64(rightval))
 		} else if err1 != nil {
 			err := fmt.Errorf("BETWEEN cannot map left value %v in field '%s' - %v", arg2val.Value(), nm, err1)
 			u.Errorf(err.Error())
@@ -643,18 +655,18 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 			if f, isBSI, err := m.ResolveField(lhval.ToString()); err == nil {
 				if rhisnull {
 					q.Operation = "DIFFERENCE" // Avoid conversion to UNION, corrected server side.
-					q.SetNullPredicate(f.Parent.Name, f.FieldName)
+					q.SetNullPredicate(f.Parent.GetName(), f.FieldName)
 				} else {
-					rowID, err := m.conn.MapValue(m.tbl.Name, lhval.ToString(), rhval.Value(), false)
+					rowID, err := m.conn.MapValue(m.tbl.GetName(), lhval.ToString(), rhval.Value(), false)
 					if err != nil {
 						u.Warnf("not ok: %v  l:%v  r:%v", node, lhval, rhval)
 						return nil, err
 					}
 					if isBSI {
-						q.SetBSIPredicate(f.Parent.Name, f.FieldName, "EQ", int64(rowID))
-						tbuf, found := m.conn.TableBuffers[f.Parent.Name]
+						q.SetBSIPredicate(f.Parent.GetName(), f.FieldName, "EQ", int64(rowID))
+						tbuf, found := m.conn.TableBuffers[f.Parent.GetName()]
 						if !found {
-							err := fmt.Errorf("table %s not open", f.Parent.Name)
+							err := fmt.Errorf("table %s not open", f.Parent.GetName())
 							u.Errorf(err.Error())
 							return nil, err
 						}
@@ -677,7 +689,7 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 							}
 						}
 					} else {
-						q.SetBitmapPredicate(f.Parent.Name, f.FieldName, rowID)
+						q.SetBitmapPredicate(f.Parent.GetName(), f.FieldName, rowID)
 					}
 				}
 			} else {
@@ -705,7 +717,7 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 			u.Errorf(err.Error())
 			return nil, err
 		}
-		q.Index = fr.Parent.Name
+		q.Index = fr.Parent.GetName()
 		q.Field = fr.FieldName
 		if q.Operation == "UNION" {
 			q.Operation = "LIKE_UNION"
@@ -728,14 +740,14 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 				}
 				firstTime := true
 				for _, v := range vt.Values() {
-					rowID, err := m.conn.MapValue(m.tbl.Name, nm, v, false)
+					rowID, err := m.conn.MapValue(m.tbl.GetName(), nm, v, false)
 					if err != nil {
 						u.Warnf("not ok: %v  l:%v  r:%v", node, nm, v)
 						return nil, err
 					}
 					if firstTime {
 						firstTime = false
-						q.SetBitmapPredicate(fr.Parent.Name, fr.FieldName, rowID)
+						q.SetBitmapPredicate(fr.Parent.GetName(), fr.FieldName, rowID)
 						if isNegate {
 							q.Operation = "DIFFERENCE"
 						} else {
@@ -745,7 +757,7 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 					} else {
 						f := q.Query.NewQueryFragment()
 						f.Negate = isNegate
-						f.SetBitmapPredicate(fr.Parent.Name, fr.FieldName, rowID)
+						f.SetBitmapPredicate(fr.Parent.GetName(), fr.FieldName, rowID)
 						if isNegate {
 							f.Operation = "DIFFERENCE"
 						} else {
@@ -757,7 +769,7 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 			} else {
 				values := make([]int64, 0)
 				for _, v := range vt.Values() {
-					rowID, err := m.conn.MapValue(m.tbl.Name, nm, v, false)
+					rowID, err := m.conn.MapValue(m.tbl.GetName(), nm, v, false)
 					if err != nil {
 						u.Warnf("not ok: %v  l:%v  r:%v", node, nm, v)
 						return nil, err
@@ -767,7 +779,7 @@ func (m *SQLToQuanta) walkFilterBinary(node *expr.BinaryNode, q *shared.QueryFra
 				if isNegate {
 					q.Operation = "DIFFERENCE"
 				}
-				q.SetBSIBatchEQPredicate(fr.Parent.Name, fr.FieldName, values)
+				q.SetBSIBatchEQPredicate(fr.Parent.GetName(), fr.FieldName, values)
 				q.Query.AddFragment(q)
 			}
 		default:
@@ -814,11 +826,11 @@ func (m *SQLToQuanta) handleBSI(op string, lhval, rhval value.Value, q *shared.Q
 			}
 		}
 	}
-	if mv, err := m.conn.MapValue(m.tbl.Name, nm, rhval.Value(), false); err == nil {
-		q.SetBSIPredicate(fr.Parent.Name, fr.FieldName, op, int64(mv))
-		tbuf, found := m.conn.TableBuffers[fr.Parent.Name]
+	if mv, err := m.conn.MapValue(m.tbl.GetName(), nm, rhval.Value(), false); err == nil {
+		q.SetBSIPredicate(fr.Parent.GetName(), fr.FieldName, op, int64(mv))
+		tbuf, found := m.conn.TableBuffers[fr.Parent.GetName()]
 		if !found {
-			err := fmt.Errorf("table %s not open", fr.Parent.Name)
+			err := fmt.Errorf("table %s not open", fr.Parent.GetName())
 			u.Errorf(err.Error())
 			return err
 		}
@@ -891,7 +903,7 @@ func (m *SQLToQuanta) eval(arg expr.Node) (value.Value, bool, bool) {
 		if aliased {
 			f = r
 		}
-		table := m.conn.TableBuffers[m.tbl.Name].Table
+		table := m.conn.TableBuffers[m.tbl.GetName()].Table
 		if _, err := table.GetAttribute(f); err != nil && f != "@timestamp" {
 			return nil, false, false
 		}
@@ -917,7 +929,7 @@ func (m *SQLToQuanta) checkFuncArgs(f *expr.FuncNode) (int, error) {
 				fieldName = r
 			} else {
 				fieldName = n.Text
-				tableName = m.tbl.Name
+				tableName = m.tbl.GetName()
 			}
 			table := m.conn.TableBuffers[tableName].Table
 			_, err := table.GetAttribute(fieldName)
@@ -1583,15 +1595,16 @@ func (m *SQLToQuanta) Put(ctx context.Context, key schema.Key, val interface{}) 
 				}
 			}
 			if a, err := table.GetAttribute(f.Name); err == nil {
+				attr := a.(*shared.BasicAttribute)
 				if !found {
 					// Check and populate default values/expr
-					if a.Required && a.DefaultValue == "" {
+					if attr.Required && attr.DefaultValue == "" {
 						return nil, fmt.Errorf("value not provided for required column %s", f.Name)
 					}
 					// The actual default value will be populated inside PutRow()
 				} else {
 					// If attribute contains columnID then we won't have to allocate one.
-					if a.ColumnID {
+					if attr.ColumnID {
 						switch val := curRow[j].(type) {
 						case uint64:
 							colID = curRow[j].(uint64)
@@ -1640,11 +1653,15 @@ func (m *SQLToQuanta) updateRow(table string, columnID uint64, updValueMap map[s
 		if err != nil {
 			return 0, fmt.Errorf("attribute %s.%s is not defined", table, k)
 		}
-		rowID, err := a.MapValue(vc.Value.Value(), nil)
+		attr, ok := a.(*core.Attribute)
+		if !ok {
+			return 0, fmt.Errorf("attribute %s.%s is not defined", table, k)
+		}
+		rowID, err := attr.MapValue(vc.Value.Value(), nil)
 		if err != nil {
 			return 0, err
 		}
-		err = m.conn.BitIndex.Update(table, a.FieldName, columnID, int64(rowID), timePartition, a.IsBSI(), a.Exclusive)
+		err = m.conn.BitIndex.Update(table, attr.FieldName, columnID, int64(rowID), timePartition, attr.IsBSI(), attr.Exclusive)
 		if err != nil {
 			return 0, err
 		}

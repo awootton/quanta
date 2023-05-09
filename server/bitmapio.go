@@ -14,6 +14,7 @@ import (
 	"time"
 
 	u "github.com/araddon/gou"
+	"github.com/disney/quanta/shared"
 )
 
 // Partition - Description of partition
@@ -38,9 +39,9 @@ type PartitionOperation struct {
 // NewPartitionOperation - Archival/Removal operations on an entire partition/shard.
 func (m *BitmapIndex) NewPartitionOperation(p *Partition, removeOnly bool) *PartitionOperation {
 
-	m.tableCacheLock.RLock()
-	defer m.tableCacheLock.RUnlock()
-	table := m.tableCache[p.Index]
+	m.TableCache.TableCacheLock.RLock()
+	defer m.TableCache.TableCacheLock.RUnlock()
+	table := m.TableCache.TableCache[p.Index]
 	if table == nil {
 		u.Errorf("NewPartitionOperation: assertion fail table is nil")
 		return nil
@@ -50,8 +51,10 @@ func (m *BitmapIndex) NewPartitionOperation(p *Partition, removeOnly bool) *Part
 		u.Errorf("NewPartitionOperation: assertion fail GetPrimaryKeyInfo: %v", err)
 		return nil
 	}
-	p.IsPK = p.Field == pka[0].FieldName
-	attr, err := table.GetAttribute(p.Field)
+	pka0 := pka[0].(*shared.BasicAttribute)
+	p.IsPK = p.Field == pka0.FieldName
+	attrTmp, err := table.GetAttribute(p.Field)
+	attr := attrTmp.(*shared.BasicAttribute)
 	if err != nil {
 		u.Errorf("assertion fail: %v", err)
 	} else {
@@ -246,16 +249,16 @@ func (m *BitmapIndex) generateStringsFilePath(aop *PartitionOperation, isArchive
 // Index number 0 is PK, index number 1 is first SK (if any)  and so forth
 func (m *BitmapIndex) generateIndexFilePath(aop *PartitionOperation, isArchivePath bool, indexNo int) (string, string) {
 
-	m.tableCacheLock.RLock()
-	defer m.tableCacheLock.RUnlock()
-	table := m.tableCache[aop.Index]
+	m.Node.TableCache.TableCacheLock.RLock()
+	defer m.Node.TableCache.TableCacheLock.RUnlock()
+	table := m.Node.TableCache.TableCache[aop.Index]
 	if table == nil {
 		u.Errorf("generateIndexFilePath: assertion fail table is nil")
 		return "", ""
 	}
-	name := table.PrimaryKey + ".PK"
+	name := table.(*shared.BasicTable).PrimaryKey + ".PK"
 	if indexNo > 0 {
-		s := strings.Split(table.SecondaryKeys, ",")
+		s := strings.Split(table.(*shared.BasicTable).SecondaryKeys, ",")
 		if indexNo > len(s) {
 			u.Errorf("generateIndexFilePath: indexNo is invalid")
 			return "", ""

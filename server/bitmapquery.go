@@ -50,6 +50,11 @@ func (m *BitmapIndex) Query(ctx context.Context, query *pb.BitmapQuery) (*pb.Que
 	dataMap := make(map[string]*roaring64.Bitmap)
 	samples := make([]*shared.RowBitmap, 0)
 
+	// debug
+	for _, v := range query.Query {
+		fmt.Printf("bitmap query fragment: %#v\n", v)
+	}
+
 	/*
 	 *  Iterate over query predicates to see if there are any null checks or situations where there is no
 	 *  union.  This can happen if there are only negated conditions in the query.
@@ -76,7 +81,7 @@ func (m *BitmapIndex) Query(ctx context.Context, query *pb.BitmapQuery) (*pb.Que
 			if found {
 				continue
 			}
-			table, ok := m.tableCache[v.Index]
+			table, ok := m.TableCache.TableCache[v.Index]
 			if !ok {
 				return nil, fmt.Errorf("Cannot locate configuration for %s", v.Index)
 			}
@@ -85,7 +90,7 @@ func (m *BitmapIndex) Query(ctx context.Context, query *pb.BitmapQuery) (*pb.Que
 				return nil, fmt.Errorf("timeRangeExistence GetPK info failed for %s - %v", v.Index, err)
 			}
 			var errx error
-			ei, errx = m.timeRangeExistence(v.Index, pka[0].FieldName, fromTime, toTime)
+			ei, errx = m.timeRangeExistence(v.Index, pka[0].(*shared.BasicAttribute).FieldName, fromTime, toTime)
 			if errx != nil {
 				return nil, fmt.Errorf("timeRangeExistence failed for %s - %v", v.Index, errx)
 			}

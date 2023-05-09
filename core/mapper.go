@@ -4,8 +4,9 @@ package core
 
 import (
 	"fmt"
-	hash "github.com/aviddiviner/go-murmur"
 	"strings"
+
+	hash "github.com/aviddiviner/go-murmur"
 )
 
 // MapperType - Mapper typedef
@@ -310,7 +311,11 @@ func ResolveMapper(attr *Attribute) (mapper Mapper, err error) {
 			return nil, fmt.Errorf("DelegationTarget not found/specified for '%s' - %v",
 				attr.FieldName, err2)
 		}
-		return ResolveMapper(target)
+		attr, ok := target.(*Attribute)
+		if !ok {
+			return nil, fmt.Errorf("DelegationTarget not an attribute for ")
+		}
+		return ResolveMapper(attr)
 	}
 
 	if attr.MappingStrategy == "Custom" || attr.MappingStrategy == "CustomBSI" {

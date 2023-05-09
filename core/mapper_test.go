@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/disney/quanta/shared"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,10 +13,12 @@ import (
 var (
 	schema *Table
 	conn   *Session
+	tableCache    *shared.TableCacheStruct
 )
 
 func setup() {
-	schema, _ = LoadTable("./testdata", nil, "cities", nil)
+	tcs := shared.NewTableCacheStruct()
+	schema, _ = LoadTable(tcs, "./testdata", nil, "cities", nil)
 	tbuf := make(map[string]*TableBuffer, 0)
 	tbuf[schema.Name] = &TableBuffer{Table: schema}
 	conn = &Session{TableBuffers: tbuf}
@@ -39,9 +42,9 @@ func TestMapperFactory(t *testing.T) {
 
 	attr, err1 := schema.GetAttribute("military")
 	assert.Nil(t, err1)
-	mapper, err := ResolveMapper(attr)
+	mapper, err := ResolveMapper(attr.(*Attribute))
 	assert.Nil(t, err)
-	value, err2 := mapper.MapValue(attr, true, nil)
+	value, err2 := mapper.MapValue(attr.(*Attribute), true, nil)
 	assert.Nil(t, err2)
 	assert.Equal(t, uint64(1), value)
 }
@@ -64,13 +67,13 @@ func TestBuiltinMappers(t *testing.T) {
 
 	values := make(map[string]uint64)
 
-	table, err := LoadTable("./testdata", nil, "cities", nil)
+	table, err := LoadTable(tableCache, "./testdata", nil, "cities", nil)
 	assert.Nil(t, err)
 	if assert.NotNil(t, table) {
 		for k, v := range data {
 			a, err := table.GetAttribute(k)
 			if assert.Nil(t, err) {
-				value, err := a.MapValue(v, nil)
+				value, err := a.(*Attribute).MapValue(v, nil)
 				if assert.Nil(t, err) {
 					values[k] = value
 				}

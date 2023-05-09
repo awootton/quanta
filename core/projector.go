@@ -90,10 +90,11 @@ func NewProjection(s *Session, foundSets map[string]*roaring64.Bitmap, joinNames
 			return nil, errx
 		}
 		for _, v := range p.joinAttributes {
-			if v.Parent.Name != driver {
+			attrParent := v.Parent.(*Table)
+			if attrParent.Name != driver {
 				// Make sure foreign key is in join attributes
-				if _, ok := p.findRelationLink(v.Parent.Name); !ok {
-					return nil, fmt.Errorf("foreign key for %s missing from projection", v.Parent.Name)
+				if _, ok := p.findRelationLink(attrParent.Name); !ok {
+					return nil, fmt.Errorf("foreign key for %s missing from projection", attrParent.Name)
 				}
 			}
 		}
@@ -156,7 +157,7 @@ func NewProjection(s *Session, foundSets map[string]*roaring64.Bitmap, joinNames
 
 	p.resultIterator = driverSet.ManyIterator()
 
-//u.Warnf("PROJ FIELDS = %#v", p.projFieldMap)
+	//u.Warnf("PROJ FIELDS = %#v", p.projFieldMap)
 	return p, nil
 }
 
@@ -179,7 +180,8 @@ func getAttributes(s *Session, fieldNames []string) ([]*Attribute, error) {
 		if !ok {
 			return nil, fmt.Errorf("table %s invalid or not opened", tableName)
 		}
-		a, err := tbuf.Table.GetAttribute(attributeName)
+		aInt, err := tbuf.Table.GetAttribute(attributeName)
+		a := aInt.(*Attribute)
 		if err != nil {
 			return nil, fmt.Errorf("attribute %s invalid - %s.%s", attributeName, st[0], st[1])
 		}
@@ -194,10 +196,11 @@ func (p *Projector) retrieveBitmapResults(foundSets map[string]*roaring64.Bitmap
 
 	fieldNames := make(map[string][]string)
 	for _, v := range attr {
-		if _, ok := fieldNames[v.Parent.Name]; !ok {
-			fieldNames[v.Parent.Name] = make([]string, 0)
+		attrParent := v.Parent.(*Table)
+		if _, ok := fieldNames[attrParent.Name]; !ok {
+			fieldNames[attrParent.Name] = make([]string, 0)
 		}
-		fieldNames[v.Parent.Name] = append(fieldNames[v.Parent.Name], v.FieldName)
+		fieldNames[attrParent.Name] = append(fieldNames[attrParent.Name], v.FieldName)
 	}
 
 	bsiResults := make(map[string]map[string]*roaring64.BSI)
@@ -363,13 +366,14 @@ func (p *Projector) fetchStrings(columnIDs []uint64, bsiResults map[string]map[s
 			continue
 		}
 		lookupAttribute := v
+		attrParent := v.Parent.(*Table)
 		/*
 		 * In a nested structure, the relation link field often doesn't have a source
 		 * including the relation link in a projection will resolve the backing data
 		 * without requiring an explicit join.
 		 */
-		if v.MappingStrategy == "ParentRelation" || v.Parent.Name != p.driverTable {
-			relation := v.Parent.Name
+		if v.MappingStrategy == "ParentRelation" || attrParent.Name != p.driverTable {
+			relation := attrParent.Name
 			if v.MappingStrategy == "ParentRelation" {
 				var errx error
 				relation, _, errx = v.GetFKSpec()
@@ -404,7 +408,7 @@ func (p *Projector) fetchStrings(columnIDs []uint64, bsiResults map[string]map[s
 		}
 		var lBatch map[interface{}]interface{}
 		var err error
-		if lookupAttribute.Parent.Name != p.driverTable {
+		if lookupAttribute.Parent.(*Table).Name != p.driverTable {
 			lBatch, err = p.getPartitionedStrings(lookupAttribute, trxColumnIDs)
 		} else {
 			lBatch, err = p.getPartitionedStrings(lookupAttribute, columnIDs)
@@ -432,12 +436,13 @@ func (p *Projector) getRow(colID uint64, strMap map[string]map[interface{}]inter
 
 	row = make([]driver.Value, len(p.projFieldMap))
 	for _, v := range p.projAttributes {
-		i, projectable := p.projFieldMap[fmt.Sprintf("%s.%s", v.Parent.Name, v.FieldName)]
+		attrParent := v.Parent.(*Table)
+		i, projectable := p.projFieldMap[fmt.Sprintf("%s.%s", attrParent.Name, v.FieldName)]
 		if !projectable {
 			continue
 		}
 		innerJoin := true
-		if jt, found := p.joinTypes[v.Parent.Name]; found {
+		if jt, found := p.joinTypes[attrParent.Name]; found {
 			innerJoin = jt
 		}
 		if v.MappingStrategy == "StringHashBSI" {
@@ -474,7 +479,7 @@ func (p *Projector) getRow(colID uint64, strMap map[string]map[interface{}]inter
 				}
 				pv := relBuf.PKAttributes[0]
 				if pv.MappingStrategy == "StringHashBSI" {
-					bsi, found := bsiResults[v.Parent.Name][v.FieldName]
+					bsi, found := bsiResults[attrParent.Name][v.FieldName]
 					if !found {
 						row[i] = "NULL"
 						continue
@@ -495,7 +500,7 @@ func (p *Projector) getRow(colID uint64, strMap map[string]map[interface{}]inter
 			}
 		}
 		if v.IsBSI() {
-			rs, eok := bsiResults[v.Parent.Name][v.FieldName]
+			rs, eok := bsiResults[attrParent.Name][v.FieldName]
 			if !eok {
 				row[i] = "NULL"
 				continue
@@ -543,7 +548,7 @@ func (p *Projector) getRow(colID uint64, strMap map[string]map[interface{}]inter
 		}
 
 		// Must be a standard bitmap
-		bmr, fok := bitmapResults[v.Parent.Name][v.FieldName]
+		bmr, fok := bitmapResults[attrParent.Name][v.FieldName]
 		if !fok {
 			row[i] = "NULL"
 			continue
@@ -574,13 +579,15 @@ func (p *Projector) getRow(colID uint64, strMap map[string]map[interface{}]inter
 func (p *Projector) checkColumnID(v *Attribute, cID uint64,
 	bsiResults map[string]map[string]*roaring64.BSI) (colID uint64, err error) {
 
-	if p.driverTable != "" && v.Parent.Name != p.driverTable {
-		if r, ok := p.findRelationLink(v.Parent.Name); !ok {
-			err = fmt.Errorf("findRelationLink failed for %s", v.Parent.Name)
+	attrParent := v.Parent.(*Table)
+
+	if p.driverTable != "" && attrParent.Name != p.driverTable {
+		if r, ok := p.findRelationLink(attrParent.Name); !ok {
+			err = fmt.Errorf("findRelationLink failed for %s", attrParent.Name)
 		} else {
 			// Translate ColID
-			if b, fok := bsiResults[r.Parent.Name][r.FieldName]; !fok {
-				err = fmt.Errorf("bsi lookup failed for %s - %s", r.Parent.Name, r.FieldName)
+			if b, fok := bsiResults[r.Parent.(*Table).Name][r.FieldName]; !fok {
+				err = fmt.Errorf("bsi lookup failed for %s - %s", r.Parent.(*Table).Name, r.FieldName)
 			} else {
 				val, _ := b.GetValue(cID)
 				colID = uint64(val)
@@ -777,7 +784,7 @@ func (p *Projector) getAggregateResult(table, field string) (result *roaring64.B
 
 // Handle boundary condition where a range of column IDs could span multiple partitions.
 func (p *Projector) getPartitionedStrings(attr *Attribute, colIDs []uint64) (map[interface{}]interface{}, error) {
-
+	attrParent := attr.Parent.(*Table)
 	lBatch := make(map[interface{}]interface{}, len(colIDs))
 	if len(colIDs) == 0 {
 		return lBatch, nil
@@ -786,7 +793,7 @@ func (p *Projector) getPartitionedStrings(attr *Attribute, colIDs []uint64) (map
 	endPartition := time.Unix(0, int64(colIDs[len(colIDs)-1]))
 
 	if startPartition.Equal(endPartition) { // Everything in one partition
-		lookupIndex := stringsPath(attr.Parent, attr.FieldName, "strings", startPartition)
+		lookupIndex := stringsPath(attrParent, attr.FieldName, "strings", startPartition)
 		for _, colID := range colIDs {
 			lBatch[colID] = ""
 		}
@@ -797,7 +804,7 @@ func (p *Projector) getPartitionedStrings(attr *Attribute, colIDs []uint64) (map
 	for _, colID := range colIDs {
 		endPartition = time.Unix(0, int64(colID))
 		if !endPartition.Equal(startPartition) {
-			lookupIndex := stringsPath(attr.Parent, attr.FieldName, "strings", startPartition)
+			lookupIndex := stringsPath(attrParent, attr.FieldName, "strings", startPartition)
 			b, err := p.connection.KVStore.BatchLookup(lookupIndex, batch, true)
 			if err != nil {
 				return nil, fmt.Errorf("BatchLookup error for [%s] - %v", lookupIndex, err)
@@ -810,7 +817,7 @@ func (p *Projector) getPartitionedStrings(attr *Attribute, colIDs []uint64) (map
 		}
 		batch[colID] = ""
 	}
-	lookupIndex := stringsPath(attr.Parent, attr.FieldName, "strings", startPartition)
+	lookupIndex := stringsPath(attrParent, attr.FieldName, "strings", startPartition)
 	b, err := p.connection.KVStore.BatchLookup(lookupIndex, batch, true)
 	if err != nil {
 		return nil, fmt.Errorf("BatchLookup error for [%s] - %v", lookupIndex, err)
