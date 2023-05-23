@@ -84,7 +84,8 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 					if _, err := os.Stat(path + sep + "schema.yaml"); err != nil {
 						return nil
 					}
-					if table, err := shared.LoadSchema(schemaPath, index, nil); err != nil {
+					table, err := shared.LoadSchema(schemaPath, index, nil)
+					if err != nil {
 						u.Errorf("ERROR: Could not load schema for %s - %v", index, err)
 						os.Exit(1)
 					} else {
@@ -104,13 +105,17 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 			u.Errorf("could not load table schema, GetTables error %v", err)
 			os.Exit(1)
 		}
-		for _, table := range tables {
-			if t, err := shared.LoadSchema(schemaPath, table, e.consul); err != nil {
-				u.Errorf("could not load schema for %s - %v", table, err)
-				os.Exit(1)
-			} else {
-				e.TableCache.TableCache[table] = t
-				u.Infof("Table %s initialized.", table)
+		fmt.Println("NewBitmapIndex tables found: ", tables)
+		if len(schemaPath) > 0 {
+			for _, table := range tables {
+				t, err := shared.LoadSchema(schemaPath, table, e.consul)
+				if err != nil {
+					u.Errorf("could not load schema for %s - %v", table, err)
+					os.Exit(1)
+				} else {
+					e.TableCache.TableCache[table] = t
+					u.Infof("Table %s initialized.", table)
+				}
 			}
 		}
 	}
@@ -168,6 +173,10 @@ func (m *BitmapIndex) JoinCluster() {
 	}
 	u.Infof("Bitmap server is joining the cluster.")
 	m.verifyNode()
+}
+
+func (m *BitmapIndex) GetName() string {
+	return "BitmapIndex"
 }
 
 // BatchMutate API call (used by client SetBit call for bulk loading data)
@@ -270,6 +279,14 @@ type BSIBitmap struct {
 func (m *BitmapIndex) newBSIBitmap(index, field string) *BSIBitmap {
 
 	attr, err := m.getFieldConfig(index, field)
+	if err != nil {
+
+		node := m.Node
+		Verify(node)
+
+		u.Errorf("newBSIBitmap - getFieldConfig error: %v", err)
+		return nil
+	}
 	var minValue, maxValue int64
 	var timeQuantumType string
 	if err == nil {
@@ -325,7 +342,11 @@ func (m *BitmapIndex) getFieldConfig(index, field string) (*shared.BasicAttribut
 
 	m.TableCache.TableCacheLock.RLock()
 	defer m.TableCache.TableCacheLock.RUnlock()
-	table := m.TableCache.TableCache[index].(*shared.BasicTable)
+	found, ok := m.TableCache.TableCache[index]
+	if !ok {
+		return nil, fmt.Errorf("getFieldConfig ERROR: Non existent index %s was referenced", index)
+	}
+	table := found.(*shared.BasicTable)
 	attrTmp, err := table.GetAttribute(field)
 	attr := attrTmp.(*shared.BasicAttribute)
 	if err != nil {
@@ -343,7 +364,17 @@ func (m *BitmapIndex) isBSI(index, field string) bool {
 
 	m.TableCache.TableCacheLock.RLock()
 	defer m.TableCache.TableCacheLock.RUnlock()
-	table := m.TableCache.TableCache[index].(*shared.BasicTable) // always safe
+
+	fmt.Println("isBsi ", Verify(m.Node))
+	fmt.Printf("isBSI: index=%s, field=%s cache=%v\n", index, field, m.TableCache.TableCache)
+
+	tableIntf, ok := m.TableCache.TableCache[index]
+	if !ok {
+		u.Errorf("isBSI: index=%s, field=%s cache=%v\n", index, field, m.TableCache.TableCache)
+		return false
+	}
+
+	table := tableIntf.(*shared.BasicTable)
 	attrTmp, err := table.GetAttribute(field)
 	if err != nil {
 		u.Errorf("attribute %s for index %s does not exist", field, index)
@@ -1132,7 +1163,8 @@ func (m *BitmapIndex) TableOperation(ctx context.Context, req *pb.TableOperation
 
 	switch req.Operation {
 	case pb.TableOperationRequest_DEPLOY:
-		if table, err := shared.LoadSchema("", req.Table, m.consul); err != nil {
+		table, err := shared.LoadSchema("", req.Table, m.consul)
+		if err != nil {
 			u.Errorf("could not load schema for %s - %v", req.Table, err)
 			os.Exit(1)
 		} else {

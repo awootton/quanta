@@ -158,11 +158,11 @@ func (m *QuantaSource) Table(table string) (*schema.Table, error) {
 	}
 	tbl := schema.NewTable(table)
 	cols := make([]string, 0)
-	for _, v := range ts.Attributes {
-		attr, ok := v.(*core.Attribute)
-		if !ok {
-			return nil, fmt.Errorf("cannot convert to *core.Attribute")
-		}
+	for _, attr := range ts.Attributes {
+		// attr, ok := v.(*core.Attribute)
+		// if !ok {
+		// 	return nil, fmt.Errorf("cannot convert to *core.Attribute")
+		// }
 		if attr.FieldName == "" {
 			if attr.MappingStrategy == "ChildRelation" {
 				continue // Ignore these

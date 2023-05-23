@@ -81,7 +81,7 @@ func StartNodes(nodeStart int) (*server.Node, error) {
 	// for index = nodeStart; index < nodeStart+nodeCount; index++
 	{
 		hashKey := "quanta-node-" + strconv.Itoa(index)
-		dataDir := "localClusterData/" + hashKey + "/data"
+		dataDir := "../test/localClusterData/" + hashKey + "/data"
 		bindAddr := "127.0.0.1"
 		port := 4010 + index
 
@@ -170,7 +170,7 @@ type LocalProxyControl struct {
 	Stop chan bool
 }
 
-func StartProxy(count int, testDataPath string) *LocalProxyControl {
+func StartProxy(count int, testConfigPath string) *LocalProxyControl {
 
 	localProxy := &LocalProxyControl{}
 
@@ -246,7 +246,8 @@ func StartProxy(count int, testDataPath string) *LocalProxyControl {
 	tableCache := shared.NewTableCacheStruct() // is this right?
 
 	// configDir := "../test/testdata" // gets: ../test/testdata/config/schema.yaml
-	configDir := ""
+	// FIXME: empty configDir panics
+	configDir := testConfigPath                                                                                    // this fails when run from test?
 	src, err := source.NewQuantaSource(tableCache, configDir, proxy.ConsulAddr, proxy.QuantaPort, sessionPoolSize) // do we really want this here?
 	if err != nil {
 		u.Error(err)

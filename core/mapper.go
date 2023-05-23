@@ -329,7 +329,7 @@ func ResolveMapper(attr *Attribute) (mapper Mapper, err error) {
 	} else {
 		mapper, err = lookupMapper(attr.MappingStrategy, attr.MapperConfig)
 	}
-	return
+	return mapper,err
 }
 
 func lookupMapper(mapperName string, conf map[string]string) (Mapper, error) {

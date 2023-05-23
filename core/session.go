@@ -133,11 +133,11 @@ func OpenSession(tableCache *shared.TableCacheStruct, path, name string, nested 
 		}
 	} else {
 		// Do scan to see if there are parent relations.   If so, open the parent too.
-		for _, v := range tab.Attributes {
-			attr, ok := v.(*Attribute)
-			if !ok {
-				return nil, fmt.Errorf("Error casting attribute %v", v)
-			}
+		for _, attr := range tab.Attributes {
+			// attr, ok := v.(*Attribute)
+			// if !ok {
+			// 	return nil, fmt.Errorf("Error casting attribute %v", v)
+			// }
 			if attr.MappingStrategy == "ParentRelation" && attr.ForeignKey != "" {
 				fkTable, _, _ := attr.GetFKSpec()
 				parent, err2 := LoadTable(tableCache, path, kvStore, fkTable, consul)
@@ -171,8 +171,8 @@ func OpenSession(tableCache *shared.TableCacheStruct, path, name string, nested 
 func recurseAndLoadTable(basePath string, kvStore *shared.KVStore, tableBuffers map[string]*TableBuffer, curTable *Table) error {
 
 	tableCache := curTable.tableCache
-	for _, v := range curTable.Attributes {
-		attr := v.(*Attribute)
+	for _, attr := range curTable.Attributes {
+		// attr := v.(*Attribute)
 		_, ok := tableBuffers[attr.ChildTable]
 		if attr.ChildTable != "" && !ok {
 			table, err := LoadTable(tableCache, basePath, kvStore, attr.ChildTable, curTable.ConsulClient)
@@ -270,8 +270,8 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 		}
 	}
 
-	for _, v := range curTable.Attributes {
-		attr := v.(*Attribute)
+	for _, attr := range curTable.Attributes {
+		// attr := v.(*Attribute)
 		if curTable.PrimaryKey != "" {
 			if _, found := tbuf.PKMap[attr.FieldName]; found {
 				continue // Already handled at this point
@@ -309,7 +309,7 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 					return fmt.Errorf("Not a nested import, source must be specified for %s", attr.FieldName)
 				}
 
-				lookupKey, err := s.resolveFKLookupKey(attr, tbuf, row, ignoreSourcePath, useNerdCapitalization)
+				lookupKey, err := s.resolveFKLookupKey(&attr, tbuf, row, ignoreSourcePath, useNerdCapitalization)
 				if err != nil {
 					return fmt.Errorf("resolveFKLookupKey %v", err)
 				}
@@ -334,7 +334,7 @@ func (s *Session) recursivePutRow(name string, row interface{}, pqTablePath stri
 				}
 			}
 		} else {
-			vals, pqps, err := s.readColumn(row, pqTablePath, attr, isChild, ignoreSourcePath, useNerdCapitalization)
+			vals, pqps, err := s.readColumn(row, pqTablePath, &attr, isChild, ignoreSourcePath, useNerdCapitalization)
 			if err != nil {
 				return fmt.Errorf("Parquet reader error - %v", err)
 			}

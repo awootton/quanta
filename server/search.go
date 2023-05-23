@@ -4,6 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash"
+	"hash/fnv"
+	"io"
+	"regexp"
+	"time"
+
 	"github.com/akrylysov/pogreb"
 	u "github.com/araddon/gou"
 	"github.com/aviddiviner/go-murmur"
@@ -13,11 +19,6 @@ import (
 	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/steakknife/bloomfilter"
 	"golang.org/x/text/unicode/norm"
-	"hash"
-	"hash/fnv"
-	"io"
-	"regexp"
-	"time"
 )
 
 var (
@@ -87,6 +88,10 @@ func (m *StringSearch) Shutdown() {
 
 // JoinCluster - Join the cluster
 func (m *StringSearch) JoinCluster() {
+}
+
+func (m *StringSearch) GetName() string {
+	return "StringSearch"
 }
 
 // BatchIndex - Insert a new batch of searchable strings.

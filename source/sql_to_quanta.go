@@ -232,7 +232,7 @@ func (m *SQLToQuanta) WalkSourceSelect(planner plan.Planner, p *plan.Source) (pl
 
 	if req.Where == nil || req.Where != nil && req.Where.Source != nil {
 		pka, _ := table.GetPrimaryKeyInfo()
-		pka0 := pka[0].(*shared.BasicAttribute)
+		pka0 := pka[0].(*core.Attribute)
 		predicate := fmt.Sprintf("%s != NULL", pka0.FieldName)
 		defaultWhere, _ := expr.ParseExpression(predicate)
 		req.Where = rel.NewSqlWhere(defaultWhere)

@@ -79,6 +79,8 @@ func MarshalConsul(in *BasicTable, consul *api.Client) error {
 
 func putRecursive(typ reflect.Type, value reflect.Value, consul *api.Client, root string) error {
 
+	// the typ might be an interface
+
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		var omit bool
@@ -96,7 +98,20 @@ func putRecursive(typ reflect.Type, value reflect.Value, consul *api.Client, roo
 		if field.Type.Kind() == reflect.Slice {
 			for j := 0; j < value.Field(i).Len(); j++ {
 				path := root + "/" + tagName
-				putRecursive(field.Type.Elem(), value.Field(i).Index(j), consul, path)
+				// attribute
+				a := value.Field(i).Index(j)
+				e := field.Type.Elem()
+				// fmt.Println("slice", path, e.String(), a.String()) // slice schema/cities/attributes shared.AttributeInterface <shared.AttributeInterface Value>
+				if e.String() == "shared.AttributeInterface" {
+					attrIntf := a.Elem()
+					attr := attrIntf.Interface().(AttributeInterface)
+					basic := attr.(*BasicAttribute)
+					// fmt.Println("slice have attr", attr)
+					e = reflect.TypeOf(*basic)
+					a = reflect.ValueOf(*basic)
+					// fmt.Println("slice e", e, a)
+				}
+				putRecursive(e, a, consul, path)
 			}
 			continue
 		}
@@ -186,6 +201,7 @@ func getRecursive(typ reflect.Type, value reflect.Value, consul *api.Client, roo
 			if len(keys) == 0 {
 				continue
 			}
+			fmt.Println("getRecursive slice", path, field.Type.String(), field.Type.Elem(), field.Type.Elem().Kind(), field.Type.Elem().String())
 			slice := reflect.MakeSlice(field.Type, 0, 0)
 			for j := 0; j < len(keys); j++ {
 				if strings.HasSuffix(path, "values") && strings.HasSuffix(keys[j], "value") {
@@ -195,10 +211,26 @@ func getRecursive(typ reflect.Type, value reflect.Value, consul *api.Client, roo
 					slice = reflect.Append(slice, newVal.Elem())
 				}
 				if strings.HasSuffix(keys[j], "fieldName") {
-					slicePath := keys[j][:len(keys[j])-10] //length of "fieldName" - 1
-					newVal := reflect.New(field.Type.Elem())
-					getRecursive(field.Type.Elem(), reflect.Indirect(newVal), consul, slicePath)
-					slice = reflect.Append(slice, newVal.Elem())
+					slicePath := keys[j][:len(keys[j])-10]   //length of "fieldName" - 1 eg schema/cities/attributes/county
+					newVal := reflect.New(field.Type.Elem()) // <*shared.AttributeInterface Value>
+					typ := field.Type.Elem()                 // shared.AttributeInterface
+					val := reflect.Indirect(newVal)          // <shared.AttributeInterface Value>
+					isAttr := false
+					basic := &BasicAttribute{}
+					if typ.String() == "shared.AttributeInterface" {
+						isAttr = true
+						newVal = reflect.ValueOf(basic)
+						typ = reflect.TypeOf(*basic)
+						val = reflect.Indirect(newVal)
+					}
+					fmt.Println("getRecursive slice", newVal.String(), typ.String(), val.String())
+					getRecursive(typ, val, consul, slicePath)
+					if isAttr {
+						intf := newVal.Interface()
+						slice = reflect.Append(slice, reflect.ValueOf(intf))
+					} else {
+						slice = reflect.Append(slice, newVal.Elem())
+					}
 				}
 			}
 			value.Field(i).Set(slice)

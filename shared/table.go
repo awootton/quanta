@@ -37,45 +37,13 @@ type BasicTable struct {
 	DisableDedup     bool                          `yaml:"disableDedup,omitempty"`
 	Attributes       []AttributeInterface          `yaml:"attributes"`
 	AttributeNameMap map[string]AttributeInterface `yaml:"-"`
-	ConsulClient     *api.Client                   `yaml:"-"`
+	// Attributes       []BasicAttribute          `yaml:"attributes"`
+	// AttributeNameMap map[string]BasicAttribute `yaml:"-"`
+	ConsulClient *api.Client `yaml:"-"`
 }
 
 type AttributeInterface interface {
 	GetParent() TableInterface
-}
-
-func (t *BasicTable) UnmarshalYAML(
-	unmarshal func(interface{}) error,
-) error {
-
-	var err error
-
-	m := yaml.MapSlice{}
-	unmarshal(&m)
-
-	t.Name = m[0].Value.(string)
-
-	err = unmarshal(&t.Name)
-	if err != nil {
-		return err
-	}
-	err = unmarshal(t.PrimaryKey)
-	if err != nil {
-		return err
-	}
-	err = unmarshal(t.SecondaryKeys)
-	if err != nil {
-		return err
-	}
-
-	attrArray := make([]BasicAttribute, 0)
-
-	// err := unmarshal(attrArray)
-
-	fmt.Println("attrArray: ", attrArray)
-
-	return err
-
 }
 
 // BasicAttribute - Field structure.
@@ -231,6 +199,7 @@ func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable
 		if err != nil {
 			return nil, err
 		}
+		// fmt.Println("LoadSchema unmarshal yaml", string(b))
 		err2 := yaml.Unmarshal(b, &table)
 		if err2 != nil {
 			return nil, err2
@@ -493,4 +462,65 @@ func (a *BasicAttribute) Compare(other *BasicAttribute) (equal bool, warnings []
 		equal = true
 	}
 	return
+}
+
+// UnmarshalYAML is a custom unmarshaller for BasicTable
+// because the attributes are interfaces.
+// I don't like it. TODO: better way.
+func (t *BasicTable) UnmarshalYAML(unmarshal func(interface{}) error) error {
+
+	var err error
+	vals := make(map[string]interface{})
+
+	m := yaml.MapSlice{}
+	unmarshal(&m)
+	for key, v := range m {
+		// fmt.Println("UnmarshalYAML key: ", key, "value: ", v)
+		_ = key
+		vals[v.Key.(string)] = v.Value
+	}
+	t.Attributes = make([]AttributeInterface, 0)
+
+	var tmp interface{}
+	var ok bool
+
+	t.Name = vals["tableName"].(string)
+	tmp, ok = vals["primaryKey"]
+	if ok {
+		t.PrimaryKey = tmp.(string)
+	}
+	tmp, ok = vals["secondaryKeys"]
+	if ok {
+		t.SecondaryKeys = tmp.(string)
+	}
+	tmp, ok = vals["defaultPredicate"]
+	if ok {
+		t.DefaultPredicate = tmp.(string)
+	}
+	tmp, ok = vals["timeQuantumType"]
+	if ok {
+		t.TimeQuantumType = tmp.(string)
+	}
+	tmp, ok = vals["disableDedup"]
+	if ok {
+		t.DisableDedup = tmp.(bool)
+	}
+	tmp, ok = vals["attributes"]
+	if ok {
+		attrs := tmp.([]interface{})
+		for _, attr := range attrs {
+			attrStr, err := yaml.Marshal(attr)
+			if err != nil {
+				return err
+			}
+			// fmt.Println("UnmarshalYAML attr: ", string(attrStr))
+			attr := &BasicAttribute{}
+			err = yaml.Unmarshal(attrStr, attr)
+			if err != nil {
+				return err
+			}
+			t.Attributes = append(t.Attributes, attr)
+		}
+	}
+	return err
 }

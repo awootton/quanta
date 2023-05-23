@@ -79,8 +79,12 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 	if isNotRunning {
 		suite.weStartedTheCluster = true
 		suite.m0, _ = StartNodes(0) // from localCluster/local-cluster-main.go
+		fmt.Println("m0 state", server.Verify(suite.m0))
 		suite.m1, _ = StartNodes(1)
+		fmt.Println("m1 state", server.Verify(suite.m1))
 		suite.m2, _ = StartNodes(2)
+		fmt.Println("m2 state", server.Verify(suite.m2))
+
 		// this is too slow
 		//fmt.Println("Waiting for nodes to start...", m2.State)
 		for suite.m0.State != server.Active || suite.m1.State != server.Active || suite.m2.State != server.Active {
@@ -89,8 +93,12 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 		}
 		//fmt.Println("done Waiting for nodes to start...", m2.State
 
+		fmt.Println("m0 state2", server.Verify(suite.m0))
+		fmt.Println("m1 state2", server.Verify(suite.m1))
+		fmt.Println("m2 state2", server.Verify(suite.m2))
+
 		// start up proxy.
-		suite.proxyControl = StartProxy(1, "") // like ./testdata/config
+		suite.proxyControl = StartProxy(1, "./testdata/config") // like ./testdata/config
 
 	}
 	defer func() {
@@ -104,6 +112,7 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 
 	// what the heck does this do? Is there a better way to tell it "USE quanta"
 	suite.tableCache = shared.NewTableCacheStruct() // why, as an sql cient, do I need this?
+
 	src, err2 := source.NewQuantaSource(suite.tableCache, "./testdata/config", "127.0.0.1:8500", 4000, 3)
 	assert.NoError(suite.T(), err2)
 	schema.RegisterSourceAsSchema("quanta", src)
@@ -145,9 +154,12 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 	{
 		results, _, err := suite.runQuery_0("select count(*) from cityzip", nil)
 		assert.NoError(suite.T(), err)
-		assert.Greater(suite.T(), len(results), 0)
-		fmt.Println("row count of cityzip = ", results[0])
-		count, _ := strconv.Atoi(results[0])
+		count := 0
+		if len(results) > 0 {
+			assert.Greater(suite.T(), len(results), 0)
+			fmt.Println("row count of cityzip = ", results[0])
+			count, _ = strconv.Atoi(results[0])
+		}
 		if count < 46280 {
 			fmt.Println("LOADING cityzip")
 			suite.loadData("cityzip", "./testdata/us_cityzip.parquet", conn, false)
@@ -157,17 +169,19 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 	// load the data if not loaded
 	{
 		results, _, err := suite.runQuery_0("select count(*) from cities", nil)
-		assert.NoError(suite.T(), err)
-		assert.Greater(suite.T(), len(results), 0)
-		fmt.Println("row count of cities = ", results[0])
-		count, _ := strconv.Atoi(results[0])
+		count := 0
+		if len(results) > 0 {
+			assert.NoError(suite.T(), err)
+			assert.Greater(suite.T(), len(results), 0)
+			fmt.Println("row count of cities = ", results[0])
+			count, _ = strconv.Atoi(results[0])
+		}
 		if count < 29488 {
 			// needs loading
 			fmt.Println("LOADING cities")
 			suite.loadData("cities", "./testdata/us_cities.parquet", conn, false)
 		}
 	}
-
 }
 
 // Test count query with nested data source

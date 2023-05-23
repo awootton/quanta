@@ -73,6 +73,7 @@ type NodeService interface {
 	Init() error
 	JoinCluster()
 	Shutdown()
+	GetName() string
 }
 
 // Node is a single node in a distributed hash table, coordinated using
@@ -341,7 +342,7 @@ func (n *Node) JoinServices() {
 // InitServices - Initialize server side services.
 func (n *Node) InitServices() error {
 
-	u.Info("Services are initializing.")
+	u.Info("Services are initializing.", n.hashKey)
 	for i, v := range n.localServices {
 		if err := v.Init(); err != nil {
 			u.Error("InitServices fail", i, err)

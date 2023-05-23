@@ -157,6 +157,10 @@ func (m *KVStore) Shutdown() {
 func (m *KVStore) JoinCluster() {
 }
 
+func (m *KVStore) GetName() string {
+	return "KVStore"
+}
+
 func (m *KVStore) getStore(index string) (db *pogreb.DB, err error) {
 
 	m.storeCacheLock.Lock()

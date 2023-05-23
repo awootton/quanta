@@ -504,8 +504,13 @@ func (m *Conn) Update() (err error) {
 	}
 	// Identify member leaves
 	for id, index := range m.nodeMap {
-		if _, ok := idMap[id]; !ok {
+		_, ok := idMap[id]
+		if !ok {
 			// delete connection and admin stub
+			if index >= len(m.clientConn) {
+				u.Errorf("NODE %s left at index %d, but index is out of range", id, index)
+				continue
+			}
 			m.clientConn[index].Close()
 			if len(m.clientConn) > 1 {
 				m.clientConn = append(m.clientConn[:index], m.clientConn[index+1:]...)
@@ -674,8 +679,11 @@ func (m *Conn) getNodeStatusForIndex(clientIndex int) (*pb.StatusMessage, error)
 
 	result, err := m.Admin[clientIndex].Status(ctx, &empty.Empty{})
 	if err != nil {
-		return nil, fmt.Errorf(fmt.Sprintf("%v.Status(_) = _, %v, node = %s\n", m.Admin[clientIndex], err,
-			m.clientConn[clientIndex].Target()))
+		target := "unknown"
+		if clientIndex < len(m.clientConn) {
+			target = m.clientConn[clientIndex].Target()
+		}
+		return nil, fmt.Errorf(fmt.Sprintf("%v.Status(_) = _, %v, node = %s\n", m.Admin[clientIndex], err, target))
 	}
 	return result, nil
 }

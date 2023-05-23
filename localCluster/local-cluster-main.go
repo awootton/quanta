@@ -33,9 +33,10 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	fmt.Println("m0 verify ", server.Verify(m0))
 	fmt.Println("All nodes Active")
 
-	test.StartProxy(1, "") // "./testdata/config")
+	test.StartProxy(1, "../test/testdata/config") // "./testdata/config")
 
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

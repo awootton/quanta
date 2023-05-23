@@ -19,9 +19,12 @@ import (
 
 // Table - Table structure.
 type Table struct {
-	*shared.BasicTable
-	// Attributes       []Attribute           // why are we repeating this?
-	// attributeNameMap map[string]*Attribute // why are we repeating this?
+	*shared.BasicTable // pointer?
+
+	//
+	Attributes       []Attribute           // why are we repeating this? the one in BasicTable is the same name.
+	attributeNameMap map[string]*Attribute // why are we repeating this?
+
 	kvStore *shared.KVStore
 
 	tableCache *shared.TableCacheStruct // copied from bitmap from session
@@ -78,15 +81,23 @@ func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared
 		return nil, err
 	}
 
+	schAttributes := make([]shared.AttributeInterface, 0, len(sch.Attributes))
+	schAttributes = append(schAttributes, sch.Attributes...)
+
 	table := &Table{BasicTable: sch, kvStore: kvStore}
-	table.Attributes = make([]shared.AttributeInterface, len(sch.Attributes))
+	// table.Attributes = make([]shared.AttributeInterface, len(sch.Attributes))
+	table.Attributes = make([]Attribute, len(sch.Attributes))
 	table.tableCache = tableCache
-	for j := range sch.Attributes { // wrap BasicAttributes
-		sharedAttr := sch.Attributes[j].(*shared.BasicAttribute)
+	for j, v := range schAttributes { // wrap BasicAttributes
+		//sharedAttr := sch.Attributes[j].(*shared.BasicAttribute)
+		if v == nil {
+			return nil, fmt.Errorf("attribute %d is nil", j)
+		}
+		sharedAttr := v.(*shared.BasicAttribute)
 		v := &Attribute{BasicAttribute: sharedAttr} //promote BasicAttribute to Attribute
-		table.Attributes[j] = v
-		jattr := table.Attributes[j].(*shared.BasicAttribute)
-		jattr.Parent = table
+		table.Attributes[j] = *v
+		// jattr := table.Attributes[j].(*shared.BasicAttribute)
+		v.Parent = table
 	}
 
 	table.AttributeNameMap = make(map[string]shared.AttributeInterface)
@@ -107,12 +118,12 @@ func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared
 	}
 
 	i := 1
-	for j, v := range table.Attributes {
+	for j, attr := range table.Attributes {
 
-		attr, ok := v.(*Attribute)
-		if !ok {
-			return nil, fmt.Errorf("attribute is not a core attribute")
-		}
+		// attr, ok := v.(*Attribute)
+		// if !ok {
+		// 	return nil, fmt.Errorf("attribute is not a core attribute")
+		// }
 		if attr.SourceName == "" && attr.FieldName == "" {
 			return nil, fmt.Errorf("a valid attribute must have an input source name or field name.  Neither exists")
 		}
@@ -148,10 +159,10 @@ func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared
 				return nil, fmt.Errorf("foreign key table name must be specified for %s", attr.FieldName)
 			}
 		}
-		jattr := table.Attributes[j].(*Attribute)
+		jattr := &table.Attributes[j] // .(*Attribute)
 		if attr.MappingStrategy != "ChildRelation" {
-
-			if jattr.mapperInstance, err = ResolveMapper(attr); err != nil {
+			jattr.mapperInstance, err = ResolveMapper(&attr)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -435,7 +446,7 @@ func (a *Attribute) GetValueForID(id uint64) (interface{}, error) {
 func (a *Attribute) Transform(val interface{}, c *Session) (newVal interface{}, err error) {
 
 	if a.mapperInstance == nil {
-		return 0, fmt.Errorf("attribute '%s' MapperInstance is nil", a.FieldName)
+		return 0, fmt.Errorf("Transform attribute '%s' MapperInstance is nil", a.FieldName)
 	}
 	return a.mapperInstance.Transform(a, val, c)
 }
@@ -444,7 +455,7 @@ func (a *Attribute) Transform(val interface{}, c *Session) (newVal interface{}, 
 func (a *Attribute) MapValue(val interface{}, c *Session) (result uint64, err error) {
 
 	if a.mapperInstance == nil {
-		return 0, fmt.Errorf("attribute '%s' MapperInstance is nil", a.FieldName)
+		return 0, fmt.Errorf("MapValue attribute '%s' MapperInstance is nil", a.FieldName)
 	}
 	return a.mapperInstance.MapValue(a, val, c)
 }
@@ -453,7 +464,7 @@ func (a *Attribute) MapValue(val interface{}, c *Session) (result uint64, err er
 func (a *Attribute) MapValueReverse(id uint64, c *Session) (result interface{}, err error) {
 
 	if a.mapperInstance == nil {
-		return 0, fmt.Errorf("attribute '%s' MapperInstance is nil", a.FieldName)
+		return 0, fmt.Errorf("MapValueReverse attribute '%s' MapperInstance is nil", a.FieldName)
 	}
 	return a.mapperInstance.MapValueReverse(a, id, c)
 }
@@ -511,8 +522,8 @@ func (t *Table) LoadFieldValues() (fieldMap map[string]*Field, err error) {
 
 	var attributeFieldMap map[string]*Field = make(map[string]*Field)
 
-	for _, v := range t.Attributes {
-		attr := v.(*Attribute)
+	for _, attr := range t.Attributes {
+		// attr := v.(*Attribute)
 		if attr.MappingStrategy != "StringEnum" {
 			continue
 		}
