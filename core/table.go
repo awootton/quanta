@@ -59,7 +59,7 @@ func (t *Table) GetName() string {
 
 // LoadTable - Load and initialize table object.
 // we'll be working with core.Table and core.Attribute and not shared.Table and shared.Attribute
-// is this the ONLY table maker?
+// is this the ONLY table maker? atw new table makenewtable makenewtable
 func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared.KVStore, name string, consulClient *api.Client) (*Table, error) {
 
 	tableCache.TableCacheLock.Lock()
@@ -259,6 +259,8 @@ func LoadTable(tableCache *shared.TableCacheStruct, path string, kvStore *shared
 				pkattrsn.FieldName)
 		}
 	}
+
+	fmt.Println("TableCache added table: ", name, path)
 
 	tableCache.TableCache[name] = table
 	return table, nil

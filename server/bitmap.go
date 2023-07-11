@@ -91,6 +91,10 @@ func NewBitmapIndex(node *Node, memoryLimitMb int) *BitmapIndex {
 					} else {
 						e.TableCache.TableCache[index] = table
 						u.Infof("Index %s initialized.", index)
+						u.Infof("Index %s initialized.", index)
+						u.Infof("Index %s initialized.", index)
+						u.Infof("Index %s initialized.", index)
+						u.Infof("Index %s initialized.", index)
 					}
 				}
 				return nil
@@ -365,8 +369,8 @@ func (m *BitmapIndex) isBSI(index, field string) bool {
 	m.TableCache.TableCacheLock.RLock()
 	defer m.TableCache.TableCacheLock.RUnlock()
 
-	fmt.Println("isBsi ", Verify(m.Node))
-	fmt.Printf("isBSI: index=%s, field=%s cache=%v\n", index, field, m.TableCache.TableCache)
+	// fmt.Println("isBsi verify:", Verify(m.Node))
+	// fmt.Printf("isBSI: index=%s, field=%s cache=%v\n", index, field, m.TableCache.TableCache)
 
 	tableIntf, ok := m.TableCache.TableCache[index]
 	if !ok {
@@ -1171,6 +1175,9 @@ func (m *BitmapIndex) TableOperation(ctx context.Context, req *pb.TableOperation
 			m.TableCache.TableCacheLock.Lock()
 			defer m.TableCache.TableCacheLock.Unlock()
 			m.TableCache.TableCache[req.Table] = table
+			u.Infof("schema for %s re-loaded and initialized", req.Table)
+			u.Infof("schema for %s re-loaded and initialized", req.Table)
+			u.Infof("schema for %s re-loaded and initialized", req.Table)
 			u.Infof("schema for %s re-loaded and initialized", req.Table)
 		}
 	case pb.TableOperationRequest_DROP:

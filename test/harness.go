@@ -131,6 +131,49 @@ func StartNodes(nodeStart int) (*server.Node, error) {
 		bitmapIndex := server.NewBitmapIndex(m, int(memLimit))
 		m.AddNodeService(bitmapIndex)
 
+		// load the table schema from the file system manually here
+
+		table := "cities"
+		t, err := shared.LoadSchema("../test/testdata/config", table, consulClient)
+		m.TableCache.TableCache[table] = t
+
+		table = "cityzip"
+		t, err = shared.LoadSchema("../test/testdata/config", table, consulClient)
+		m.TableCache.TableCache[table] = t
+
+		table = "dmltest"
+		t, err = shared.LoadSchema("../test/testdata/config", table, consulClient)
+		m.TableCache.TableCache[table] = t
+
+		// try to load table cache from consul, or from data directory
+		// dd dd dd this is garbage atw
+		// schemaPath := ""
+		// {
+		// 	var tables []string
+		// 	err := shared.Retry(5, 2*time.Second, func() (err error) {
+		// 		tables, err = shared.GetTables(consulClient)
+		// 		return
+		// 	})
+		// 	if err != nil {
+		// 		u.Errorf("could not load table schema, GetTables error %v", err)
+		// 		os.Exit(1)
+		// 	}
+		// 	fmt.Println("NewBitmapIndex tables found: ", tables)
+		// 	if len(schemaPath) > 0 {
+		// 		for _, table := range tables {
+		// 			t, err := shared.LoadSchema(schemaPath, table, consulClient)
+		// 			if err != nil {
+		// 				u.Errorf("could not load schema for %s - %v", table, err)
+		// 				os.Exit(1)
+		// 			} else {
+		// 				m.TableCache.TableCache[table] = t
+		// 				u.Infof("Table %s initialized.", table)
+		// 			}
+		// 		}
+		// 	}
+
+		// }
+
 		// Start listening endpoint
 		m.Start()
 

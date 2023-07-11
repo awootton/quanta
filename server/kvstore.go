@@ -59,7 +59,7 @@ func (m *KVStore) Init() error {
 		return nil
 	}
 
-	tables, err := shared.GetTables(m.Node.consul)
+	tables, err := shared.GetTables(m.Node.consul) // list of strings
 	if err != nil {
 		return err
 	}

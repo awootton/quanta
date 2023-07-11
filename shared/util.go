@@ -177,6 +177,10 @@ func unmarshalConsul(consul *api.Client, name string) (BasicTable, error) {
 	}
 	ps := reflect.ValueOf(&table)
 	err := getRecursive(reflect.TypeOf(table), ps.Elem(), consul, "schema/"+name)
+
+	fmt.Println("unmarshalConsul 11", table)
+	fmt.Println("unmarshalConsul 11", table)
+	fmt.Println("unmarshalConsul 11", table)
 	return table, err
 }
 

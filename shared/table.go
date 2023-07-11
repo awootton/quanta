@@ -192,7 +192,7 @@ const (
 // LoadSchema - Load a new Table object from configuration.
 func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable, error) { // was BasicTable
 
-	var table BasicTable // TableInterface // BasicTable or core.Table
+	var table BasicTable // TableInterface // BasicTable or core.Table ? atw
 	table.Attributes = make([]AttributeInterface, len(table.Attributes))
 	if path != "" {
 		b, err := ioutil.ReadFile(path + SEP + name + SEP + "schema.yaml")
@@ -207,6 +207,7 @@ func LoadSchema(path string, name string, consulClient *api.Client) (*BasicTable
 	} else { // load from Consul
 		var err error
 		table, err = unmarshalConsul(consulClient, name)
+		
 		if err != nil {
 			return nil, fmt.Errorf("Error UnmarshalConsul: %v", err)
 		}
@@ -466,7 +467,7 @@ func (a *BasicAttribute) Compare(other *BasicAttribute) (equal bool, warnings []
 
 // UnmarshalYAML is a custom unmarshaller for BasicTable
 // because the attributes are interfaces.
-// I don't like it. TODO: better way.
+// I don't like it (atw). TODO: better way.
 func (t *BasicTable) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	var err error

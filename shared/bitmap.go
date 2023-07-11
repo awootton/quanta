@@ -47,7 +47,6 @@ func NewBitmapIndex(conn *Conn) *BitmapIndex {
 	c := &BitmapIndex{Conn: conn, client: clients}
 	conn.RegisterService(c)
 	c.tableCache = NewTableCacheStruct()
-	c.tableCache.TableCache = make(map[string]TableInterface)
 	return c
 }
 

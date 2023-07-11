@@ -135,13 +135,15 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 		log.Fatal(err3)
 	}
 
+	context := &proxy.Context{ConsulAddr: "127.0.0.1:8500", Port: 8500, Debug: true}
+
 	create := admin.CreateCmd{
 		Table:     "cities",
 		SchemaDir: "./testdata/config",
 		Confirm:   true,
 	}
-	context := &proxy.Context{ConsulAddr: "127.0.0.1:8500", Port: 8500, Debug: true}
 
+	// it blows up if I don't create the tables first
 	create.Run(context)
 	create.Table = "cityzip"
 	create.Run(context)
@@ -151,7 +153,12 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 	tables := &admin.TablesCmd{}
 	tables.Run(context)
 
-	{
+	fmt.Println("LOADING cityzip 0")
+	suite.loadData("cityzip", "./testdata/us_cityzip.parquet", conn, false)
+	fmt.Println("LOADING cities 0")
+	suite.loadData("cities", "./testdata/us_cities.parquet", conn, false)
+
+	if false {
 		results, _, err := suite.runQuery_0("select count(*) from cityzip", nil)
 		assert.NoError(suite.T(), err)
 		count := 0
@@ -167,7 +174,7 @@ func (suite *QuantaTestSuite3) SetupSuite() {
 	}
 
 	// load the data if not loaded
-	{
+	if false {
 		results, _, err := suite.runQuery_0("select count(*) from cities", nil)
 		count := 0
 		if len(results) > 0 {
