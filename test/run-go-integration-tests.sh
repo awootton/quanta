@@ -2,6 +2,14 @@
 
 # You can also add the -race flag to different go commands like go test, to help detect where race conditions happen: golang.org/doc/articles/race_detector.html 
 
+
+sleep 1
+echo "starting TestTableMod_change"
+# FIXME: 
+go test -timeout 300s -run ^TestTableMod_change$  github.com/disney/quanta/test
+
+
+
 sleep 1
 echo "starting TestBasic"
 go test -timeout 120s -run ^TestBasic$  github.com/disney/quanta/test-integration
